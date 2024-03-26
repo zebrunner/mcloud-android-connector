@@ -1,88 +1,134 @@
 #!/bin/bash
 
-# start adb allowing remote access by "-a" arg
+. /opt/debug.sh
+. /opt/logger.sh
 
+logger "INFO" "\n\n\n\t\tMCLOUD-ANDROID-CONNECTOR\n\n"
+
+
+#### Start ADB
+# "-a" - allow remote access
 # https://github.com/sorccu/docker-adb
-# 2016-07-02 Due to internal ADB changes our previous start command no longer works in the latest version.
-# The command has been updated, but if you were specifying it yourself, make sure you're using adb -a -P 5037 server nodaemon.
-# Do NOT use the fork-server argument anymore.
-# make sure to use hardcoded 5037 as ADB_PORT only for sharing outside!
 adb -a -P 5037 server nodaemon &
 sleep 1
 
-# ADB connect (via wireless network or via tcp for redroid emulator)
-if [ ! -z "$ANDROID_DEVICE" ]; then
-    ret=1
-    while [[ $ret -eq 1 ]]; do
-        echo "Connecting to: ${ANDROID_DEVICE}"
-        adb connect ${ANDROID_DEVICE}
-        adb devices | grep ${ANDROID_DEVICE} | grep "device"
-        ret=$?
-        if [[ $ret -eq 1 ]]; then
-            sleep ${ADB_POLLING_SEC}
-        fi
-    done
-    echo "Connected to: ${ANDROID_DEVICE}."
-fi
 
-if [ "$ANDROID_DEVICE" == "device:5555" ]; then
-    # Moved sleep after reconnection to root where the problem occurs much more often
-    #sleep 5
-    #adb devices
-
-    # install appium apk
-    if [ -f /usr/lib/node_modules/appium/node_modules/appium-uiautomator2-driver/node_modules/io.appium.settings/apks/settings_apk-debug.apk ]; then
-        adb install /usr/lib/node_modules/appium/node_modules/appium-uiautomator2-driver/node_modules/io.appium.settings/apks/settings_apk-debug.apk
+#### ADB connect
+# Via wireless network or via tcp for redroid emulator
+if [[ -n "$ANDROID_DEVICE" ]]; then
+  isConnected=0
+  declare -i index=0
+  while [[ $index -lt 10 ]]; do
+    logger "Connecting to: ${ANDROID_DEVICE}"
+    adb connect "${ANDROID_DEVICE}"
+    if adb devices | grep "${ANDROID_DEVICE}" | grep "device"; then
+      isConnected=1
+      logger "Connected: ${ANDROID_DEVICE}"
+      break
     fi
 
-    # download and install chrome apk from https://www.apkmirror.com/apk/google-inc/chrome/chrome-99-0-4844-73-release/
-    # version: x86 + x86_64
-    # url: https://www.apkmirror.com/apk/google-inc/chrome/chrome-99-0-4844-73-release/google-chrome-fast-secure-99-0-4844-73-10-android-apk-download/
-    # /tmp/zebrunner/chrome/latest.apk is default shared location for chrome browser apk
-    if [ -f /tmp/zebrunner/chrome/latest.apk ]; then
-        adb install /tmp/zebrunner/chrome/latest.apk
-    fi
+    sleep "${ADB_POLLING_SEC}"
+    index+=1
+  done
+
+  if [[ $isConnected -eq 0 ]]; then
+    logger "ERROR" "Device ${ANDROID_DEVICE} is not connected!"
+    exit 1
+  fi
 fi
 
+
+#### Detect device state
+isAvailable=0
 declare -i index=0
 # as default ADB_POLLING_SEC is 5s then we wait for authorizing ~50 sec only
-while [[ $index -lt 10 ]]
-do
-    # Possible adb statuses - https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/adb.cpp#118
-    # Possible adb statuses2 - https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/proto/devices.proto#25
-    # UsbNoPermissionsShortHelpText https://android.googlesource.com/platform/system/core/+/refs/heads/main/diagnose_usb/diagnose_usb.cpp#83
-    state=$(adb get-state)
-    case $state in
-        "device")
-            echo "Device connected successfully."
-            break
-        ;;
-        "offline" | "authorizing" | "connecting" | "unknown")
-            echo "Device state: '$state'. One more attempt in $ADB_POLLING_SEC seconds."
-            exit 2
-        ;;
-        "bootloader" | "host" | "recovery" | "rescue" | "sideload" | "unauthorized" | "no permissions"*)
-            echo "Device state: '$state'. There is no reason to try to reconnect."
-            exit 1
-        ;;
-        *)
-            echo "Not documented device state: '$state'. One more attempt in $ADB_POLLING_SEC seconds."
-            exit 2
-        ;;
-    esac
+while [[ $index -lt 10 ]]; do
+  # Possible adb statuses - https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/adb.cpp#118
+  # Possible adb statuses2 - https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/proto/devices.proto#25
+  # UsbNoPermissionsShortHelpText https://android.googlesource.com/platform/system/core/+/refs/heads/main/diagnose_usb/diagnose_usb.cpp#83
+  state=$(adb get-state 2>&1)
+  logger state: "$state"
+  echo
 
-    sleep ${ADB_POLLING_SEC}
-    index+=1
+  case $state in
+  "device")
+    logger "Device connected successfully."
+    isAvailable=1
+    break
+    ;;
+  *"authorizing"* | *"connecting"* | *"unknown"* | *"bootloader"*)
+    # do not break to repeat verification until device in temporary state
+    logger "Waiting for valid device state..."
+    ;;
+  *"unauthorized"*)
+    logger "WARN" "Authorize device manually!"
+    exit 1
+    ;;
+  *"offline"*)
+    logger "WARN" "Device is offline, performing adb reconnect."
+    adb reconnect
+    ;;
+  *"no devices/emulators found"*)
+    logger "WARN" "Device not found, need to perform usb port reset."
+    #TODO: let's test release completely without usbreset binary usage
+    # usbreset "${DEVICE_BUS}"
+    ;;
+  *)
+    # it should cover such state as: host, recovery, rescue, sideload, no permissions
+    logger "ERROR" "Troubleshoot device manually to define the best strategy."
+    exit 1
+    ;;
+  esac
+
+  logger "sleeping ${ADB_POLLING_SEC} seconds..."
+  sleep "${ADB_POLLING_SEC}"
+  index+=1
 done
 
+if [[ $isAvailable -eq 0 ]]; then
+  # device is in the state we can't fix so exit without restart
+  exit 1
+fi
+
+
+#### Make sure device is fully booted
+declare -i index=0
 info=""
 # to support device reboot as device is available by adb but not functioning correctly.
-# this extra dumpsys display call guarantees that android is fully booted
-while [[ "$info" == "" ]]
-do
-    info=`adb shell dumpsys display | grep -A 20 DisplayDeviceInfo`
-    echo "info: ${info}"
+# this extra dumpsys display call guarantees that android is fully booted (wait up to 5min)
+while [[ "$info" == "" && $index -lt 60 ]]; do
+  info=$(adb shell dumpsys display | grep -A 20 DisplayDeviceInfo)
+  logger "sleeping ${ADB_POLLING_SEC} seconds..."
+  sleep "${ADB_POLLING_SEC}"
+  index+=1
 done
 
-#TODO: implement healthcheck to reconnest or reboot device using usbreset or exit with 0
-sleep infinity
+if [[ "$info" == "" ]]; then
+  logger "WARN" "Device dumpsys display is not available yet. Potentially device is not fully booted yet!"
+  exit 1
+else
+  logger "info: $info"
+fi
+
+
+#### Extra steps for Zebrunner Redroid Emulator
+if [[ "$ANDROID_DEVICE" == "device:5555" ]]; then
+  # Moved sleep after reconnection to root where the problem occurs much more often
+  #sleep 5
+  #adb devices
+
+  # install appium apk
+  if [[ -f /usr/lib/node_modules/appium/node_modules/appium-uiautomator2-driver/node_modules/io.appium.settings/apks/settings_apk-debug.apk ]]; then
+    adb install /usr/lib/node_modules/appium/node_modules/appium-uiautomator2-driver/node_modules/io.appium.settings/apks/settings_apk-debug.apk
+  fi
+
+  # download and install chrome apk from https://www.apkmirror.com/apk/google-inc/chrome/chrome-99-0-4844-73-release/
+  # version: x86 + x86_64
+  # url: https://www.apkmirror.com/apk/google-inc/chrome/chrome-99-0-4844-73-release/google-chrome-fast-secure-99-0-4844-73-10-android-apk-download/
+  # /tmp/zebrunner/chrome/latest.apk is default shared location for chrome browser apk
+  if [[ -f /tmp/zebrunner/chrome/latest.apk ]]; then
+    adb install /tmp/zebrunner/chrome/latest.apk
+  fi
+fi
+
+logger "Device is fully available."
