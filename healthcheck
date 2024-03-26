@@ -1,0 +1,10 @@
+#!/bin/bash
+
+if adb devices | grep offline; then
+  echo "Device is offline!"
+  adb reconnect
+  if ! adb devices | grep device; then
+    echo "Device is not accessible after reconnect!"
+    exit 1
+  fi
+fi
