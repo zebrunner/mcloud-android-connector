@@ -1,30 +1,25 @@
 FROM alpine:3.19.1
+# In case of any build errors try to use 'FROM --platform=linux/amd64 ...'
 
-LABEL maintainer "Vadim Delendik <vdelendik@zebrunner.com>"
+LABEL maintainer="Vadim Delendik <vdelendik@zebrunner.com>"
 
-ENV DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND=noninteractive \
+    # Android envs
+    ADB_PORT=5037 \
+    ANDROID_DEVICE='' \
+    ADB_POLLING_SEC=5
 
-# Android envs
-ENV ADB_PORT=5037
-ENV ANDROID_DEVICE=
-ENV ADB_POLLING_SEC=5
-
-#=============
-# Set WORKDIR
-#=============
 WORKDIR /root
 
-RUN apk add --no-cache \
-    bash
+RUN apk add --no-cache bash ;\
+    apk add --no-cache android-tools --repository=http://dl-cdn.alpinelinux.org/alpine/edge/testing &&\
+    adb --version
 
-# ADB part
-RUN apk add \
-    android-tools \
-    --repository=http://dl-cdn.alpinelinux.org/alpine/edge/testing
-
-RUN adb --version
-
-# Copy entrypoint script
-ADD entrypoint.sh /
+COPY logger.sh /opt
+COPY debug.sh /opt
+COPY entrypoint.sh /
+COPY healthcheck /usr/local/bin
 
 ENTRYPOINT ["/entrypoint.sh"]
+
+HEALTHCHECK --interval=10s --retries=3 CMD ["healthcheck"]
