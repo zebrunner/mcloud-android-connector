@@ -134,4 +134,5 @@ fi
 logger "Device is fully available."
 
 #TODO: implement healthcheck to reconnect or reboot device or exit with 0
+logger "WARN" "Infinity sleep activated"
 sleep infinity
