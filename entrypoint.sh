@@ -132,3 +132,6 @@ if [[ "$ANDROID_DEVICE" == "device:5555" ]]; then
 fi
 
 logger "Device is fully available."
+
+#TODO: implement healthcheck to reconnect or reboot device or exit with 0
+sleep infinity
