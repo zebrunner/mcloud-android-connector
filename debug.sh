@@ -19,7 +19,13 @@ if [[ "${DEBUG}" == "true" ]]; then
   echo "#                  DEBUG mode is on!                  #"
   echo "#                                                     #"
   echo "#######################################################"
-  trap 'echo "Exit attempt intercepted. Sleep for ${DEBUG_TIMEOUT} seconds activated!"; sleep ${DEBUG_TIMEOUT};' EXIT
+  trap 'echo "#######################################################";
+    echo "#                                                     #";
+    echo "#              Exit attempt intercepted.              #";
+    echo "#         Sleep for ${DEBUG_TIMEOUT} seconds activated!"          #";
+    echo "#                                                     #";
+    echo "#######################################################";
+    sleep ${DEBUG_TIMEOUT};' EXIT
 fi
 
 if [[ "${VERBOSE}" == "true" ]]; then
