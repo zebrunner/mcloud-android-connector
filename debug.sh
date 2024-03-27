@@ -22,7 +22,9 @@ if [[ "${DEBUG}" == "true" ]]; then
   trap 'echo "#######################################################";
     echo "#                                                     #";
     echo "#              Exit attempt intercepted.              #";
-    echo "#         Sleep for ${DEBUG_TIMEOUT} seconds activated!"          #";
+    echo -n "#";
+    echo -n "Sleep for ${DEBUG_TIMEOUT} seconds activated!" | sed  -e :a -e "s/^.\{1,51\}$/ & /;ta";
+    echo "#";
     echo "#                                                     #";
     echo "#######################################################";
     sleep ${DEBUG_TIMEOUT};' EXIT
