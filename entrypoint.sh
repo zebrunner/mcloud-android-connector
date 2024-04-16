@@ -41,7 +41,7 @@ fi
 #### Detect device state
 if ! healthcheck ; then
   logger "WARN" "Device is not ready."
-  exit 1
+  exit 0
 fi
 
 
