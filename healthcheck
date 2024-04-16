@@ -12,8 +12,8 @@ while [[ $index -lt 10 ]]; do
   # Possible adb statuses2 - https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/proto/devices.proto#25
   # UsbNoPermissionsShortHelpText https://android.googlesource.com/platform/system/core/+/refs/heads/main/diagnose_usb/diagnose_usb.cpp#83
   state=$(adb get-state 2>&1)
+  logger --------------
   logger state: "$state"
-  echo
 
   case $state in
   "device")
