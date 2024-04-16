@@ -39,7 +39,7 @@ fi
 
 
 #### Detect device state
-if healthcheck; then
+if ! healthcheck ; then
   logger "WARN" "Device is not ready."
   exit 1
 fi
