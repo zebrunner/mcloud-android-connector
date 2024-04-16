@@ -39,7 +39,7 @@ fi
 
 
 #### Detect device state
-if ! healthcheck ; then
+if ! healthcheck; then
   logger "WARN" "Device is not ready."
   exit 0
 fi
@@ -87,6 +87,12 @@ fi
 
 logger "Device is fully available."
 
-#TODO: implement healthcheck to reconnect or reboot device or exit with 0
-logger "WARN" "Infinity sleep activated"
-sleep infinity
+
+#### Healthcheck
+while :; do
+  if ! healthcheck; then
+    logger "WARN" "Device connection lost."
+    exit 0
+  fi
+  sleep 30
+done
