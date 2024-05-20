@@ -39,55 +39,9 @@ fi
 
 
 #### Detect device state
-isAvailable=0
-declare -i index=0
-# as default ADB_POLLING_SEC is 5s then we wait for authorizing ~50 sec only
-while [[ $index -lt 10 ]]; do
-  # Possible adb statuses - https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/adb.cpp#118
-  # Possible adb statuses2 - https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/proto/devices.proto#25
-  # UsbNoPermissionsShortHelpText https://android.googlesource.com/platform/system/core/+/refs/heads/main/diagnose_usb/diagnose_usb.cpp#83
-  state=$(adb get-state 2>&1)
-  logger state: "$state"
-  echo
-
-  case $state in
-  "device")
-    logger "Device connected successfully."
-    isAvailable=1
-    break
-    ;;
-  *"authorizing"* | *"connecting"* | *"unknown"* | *"bootloader"*)
-    # do not break to repeat verification until device in temporary state
-    logger "Waiting for valid device state..."
-    ;;
-  *"unauthorized"*)
-    logger "WARN" "Authorize device manually!"
-    exit 1
-    ;;
-  *"offline"*)
-    logger "WARN" "Device is offline, performing adb reconnect."
-    adb reconnect
-    ;;
-  *"no devices/emulators found"*)
-    logger "WARN" "Device not found, need to perform usb port reset."
-    #TODO: let's test release completely without usbreset binary usage
-    # usbreset "${DEVICE_BUS}"
-    ;;
-  *)
-    # it should cover such state as: host, recovery, rescue, sideload, no permissions
-    logger "ERROR" "Troubleshoot device manually to define the best strategy."
-    exit 1
-    ;;
-  esac
-
-  logger "sleeping ${ADB_POLLING_SEC} seconds..."
-  sleep "${ADB_POLLING_SEC}"
-  index+=1
-done
-
-if [[ $isAvailable -eq 0 ]]; then
-  # device is in the state we can't fix so exit without restart
-  exit 1
+if ! healthcheck; then
+  logger "WARN" "Device is not ready."
+  exit 0
 fi
 
 
@@ -133,6 +87,12 @@ fi
 
 logger "Device is fully available."
 
-#TODO: implement healthcheck to reconnect or reboot device or exit with 0
-logger "WARN" "Infinity sleep activated"
-sleep infinity
+
+#### Healthcheck
+while :; do
+  if ! healthcheck; then
+    logger "WARN" "Device connection lost."
+    exit 0
+  fi
+  sleep 30
+done
