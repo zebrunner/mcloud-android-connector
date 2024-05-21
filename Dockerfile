@@ -18,7 +18,7 @@ RUN apk add --no-cache bash ;\
 COPY logger.sh /opt
 COPY debug.sh /opt
 COPY entrypoint.sh /
-COPY usbreset-alpine /usr/local/bin
+COPY usbreset /usr/local/bin
 COPY healthcheck /usr/local/bin
 
 ENTRYPOINT ["/entrypoint.sh"]
