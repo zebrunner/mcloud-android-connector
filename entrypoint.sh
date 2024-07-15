@@ -65,6 +65,10 @@ else
 fi
 
 
+#### Print device filesystem usage statistics
+adb shell df -h
+
+
 #### Extra steps for Zebrunner Redroid Emulator
 if [[ "$ANDROID_DEVICE" == "device:5555" ]]; then
   # Moved sleep after reconnection to root where the problem occurs much more often
