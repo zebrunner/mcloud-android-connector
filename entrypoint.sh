@@ -65,7 +65,7 @@ else
 fi
 
 
-#### Print filesystem usage statistics
+#### Print device filesystem usage statistics
 adb shell df -h
 
 
