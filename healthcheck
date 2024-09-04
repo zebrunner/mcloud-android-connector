@@ -35,8 +35,8 @@ while [[ $index -lt 10 ]]; do
     ;;
   *"no devices/emulators found"*)
     if [[ -n "$ANDROID_DEVICE" ]]; then
-      logger "WARN" "Remote device is not found, performing adb reconnect."
-      adb reconnect
+      logger "WARN" "Remote device is not found, restarting container."
+      exit 1
     else
       logger "WARN" "Device not found, performing usb port reset."
       usbreset "${DEVICE_BUS}" || exit 0
