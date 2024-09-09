@@ -34,8 +34,13 @@ while [[ $index -lt 10 ]]; do
     adb reconnect
     ;;
   *"no devices/emulators found"*)
-    logger "WARN" "Device not found, performing usb port reset."
-    usbreset "${DEVICE_BUS}"
+    if [[ -n "$ANDROID_DEVICE" ]]; then
+      logger "WARN" "Remote device is not found, restarting container."
+      exit 1
+    else
+      logger "WARN" "Device not found, performing usb port reset."
+      usbreset "${DEVICE_BUS}" || exit 0
+    fi
     ;;
   *)
     # it should cover such state as: host, recovery, rescue, sideload, no permissions
