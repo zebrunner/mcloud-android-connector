@@ -94,9 +94,60 @@ logger "Device is fully available."
 
 #### Healthcheck
 while :; do
-  if ! healthcheck; then
-    logger "WARN" "Device connection lost."
+  isAvailable=0
+  declare -i index=0
+  # as default ADB_POLLING_SEC is 5s then we wait for authorizing ~50 sec only
+  while [[ $index -lt 10 ]]; do
+    # Possible adb statuses - https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/adb.cpp#118
+    # Possible adb statuses2 - https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/proto/devices.proto#25
+    # UsbNoPermissionsShortHelpText https://android.googlesource.com/platform/system/core/+/refs/heads/main/diagnose_usb/diagnose_usb.cpp#83
+    state=$(adb get-state 2>&1)
+    logger --------------
+    logger state: "$state"
+
+    case $state in
+    "device")
+      logger "Device connected successfully."
+      isAvailable=1
+      break
+      ;;
+    *"authorizing"* | *"connecting"* | *"unknown"* | *"bootloader"*)
+      # do not break to repeat verification until device in temporary state
+      logger "Waiting for valid device state..."
+      ;;
+    *"unauthorized"*)
+      logger "WARN" "Authorize device manually!"
+      exit 0
+      ;;
+    *"offline"*)
+      logger "WARN" "Device is offline, performing adb reconnect."
+      adb reconnect
+      ;;
+    *"no devices/emulators found"*)
+      if [[ -n "$ANDROID_DEVICE" ]]; then
+        logger "WARN" "Remote device is not found, restarting container."
+        exit 1
+      else
+        logger "WARN" "Device not found, performing usb port reset or restarting container, if can't reset usb."
+        usbreset "${DEVICE_BUS}" || exit 1
+      fi
+      ;;
+    *)
+      # it should cover such state as: host, recovery, rescue, sideload, no permissions
+      logger "ERROR" "Troubleshoot device manually to define the best strategy."
+      exit 0
+      ;;
+    esac
+
+    logger "One more attempt in ${ADB_POLLING_SEC} seconds..."
+    sleep "${ADB_POLLING_SEC}"
+    index+=1
+  done
+
+  if [[ $isAvailable -eq 0 ]]; then
+    logger "ERROR" "Retry limit reached. Exiting."
     exit 0
   fi
+
   sleep 30
 done
