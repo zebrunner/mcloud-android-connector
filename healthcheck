@@ -2,11 +2,10 @@
 
 state=$(adb get-state 2>&1)
 
+echo "Device state: $state"
+
 if [ "$state" = "device" ]; then
-  echo 0
-  #exit 0
+  exit 0
 else
-  echo "$state"
-  echo 1
-  #exit 1
+  exit 1
 fi
