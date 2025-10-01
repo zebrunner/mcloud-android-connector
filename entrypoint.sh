@@ -92,7 +92,7 @@ fi
 logger "Device is fully available."
 
 
-#### Healthcheck
+#### Entrypoint holder
 while :; do
   isAvailable=0
   declare -i index=0
@@ -149,5 +149,5 @@ while :; do
     exit 0
   fi
 
-  sleep 30
+  sleep 33
 done
