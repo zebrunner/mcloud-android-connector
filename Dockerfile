@@ -15,10 +15,10 @@ RUN apk add --no-cache bash ;\
     apk add --no-cache android-tools --repository=http://dl-cdn.alpinelinux.org/alpine/edge/testing &&\
     adb --version
 
-COPY logger.sh /opt
-COPY debug.sh /opt
+COPY util/logger.sh /opt
+COPY util/debug.sh /opt
 COPY entrypoint.sh /
-COPY usbreset /usr/local/bin
+COPY bin/usbreset /usr/local/bin
 COPY healthcheck /usr/local/bin
 
 ENTRYPOINT ["/entrypoint.sh"]
