@@ -9,18 +9,19 @@ ENV DEBIAN_FRONTEND=noninteractive \
     ANDROID_DEVICE='' \
     ADB_POLLING_SEC=5
 
-WORKDIR /root
+RUN mkdir /opt/zebrunner/
+
+WORKDIR /opt/zebrunner/
 
 RUN apk add --no-cache bash ;\
     apk add --no-cache android-tools --repository=http://dl-cdn.alpinelinux.org/alpine/edge/testing &&\
     adb --version
 
-COPY util/logger.sh /opt
-COPY util/debug.sh /opt
-COPY entrypoint.sh /
-COPY bin/usbreset /usr/local/bin
+COPY bin/ /usr/local/bin/
+COPY util/ /opt/zebrunner/util/
+COPY entrypoint.sh /opt/zebrunner/
 COPY healthcheck /usr/local/bin
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/opt/zebrunner/entrypoint.sh"]
 
 HEALTHCHECK --interval=10s --retries=3 CMD ["healthcheck"]
