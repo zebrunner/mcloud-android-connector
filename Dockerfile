@@ -20,8 +20,8 @@ RUN apk add --no-cache bash ;\
 COPY bin/ /usr/local/bin/
 COPY util/ /opt/zebrunner/util/
 COPY entrypoint.sh /opt/zebrunner/
-COPY healthcheck /usr/local/bin
 
 ENTRYPOINT ["/opt/zebrunner/entrypoint.sh"]
 
-HEALTHCHECK --interval=10s --retries=3 CMD ["healthcheck"]
+HEALTHCHECK --interval=20s --timeout=5s --start-period=120s --start-interval=10s --retries=3 \
+  CMD sh -c '[ "$(adb get-state 2>&1)" = "device" ]'
