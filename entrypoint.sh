@@ -38,13 +38,6 @@ if [[ -n "$ANDROID_DEVICE" ]]; then
 fi
 
 
-#### Detect device state
-if ! healthcheck; then
-  logger "WARN" "Device is not ready."
-  exit 0
-fi
-
-
 #### Make sure device is fully booted
 declare -i index=0
 info=""
