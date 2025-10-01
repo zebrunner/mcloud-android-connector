@@ -1,4 +1,4 @@
-FROM alpine:3.19.1
+FROM alpine:3.22.1
 # In case of any build errors try to use 'FROM --platform=linux/amd64 ...'
 
 LABEL maintainer="Vadim Delendik <vdelendik@zebrunner.com>"
@@ -9,18 +9,19 @@ ENV DEBIAN_FRONTEND=noninteractive \
     ANDROID_DEVICE='' \
     ADB_POLLING_SEC=5
 
-WORKDIR /root
+RUN mkdir /opt/zebrunner/
+
+WORKDIR /opt/zebrunner/
 
 RUN apk add --no-cache bash ;\
     apk add --no-cache android-tools --repository=http://dl-cdn.alpinelinux.org/alpine/edge/testing &&\
     adb --version
 
-COPY logger.sh /opt
-COPY debug.sh /opt
-COPY entrypoint.sh /
-COPY usbreset /usr/local/bin
-COPY healthcheck /usr/local/bin
+COPY bin/ /usr/local/bin/
+COPY util/ /opt/zebrunner/util/
+COPY entrypoint.sh /opt/zebrunner/
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/opt/zebrunner/entrypoint.sh"]
 
-HEALTHCHECK --interval=10s --retries=3 CMD ["healthcheck"]
+HEALTHCHECK --interval=20s --timeout=5s --start-period=120s --start-interval=10s --retries=3 \
+  CMD sh -c '[ "$(adb get-state 2>&1)" = "device" ]'
