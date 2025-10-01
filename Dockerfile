@@ -1,4 +1,4 @@
-FROM alpine:3.19.1
+FROM alpine:3.22.1
 # In case of any build errors try to use 'FROM --platform=linux/amd64 ...'
 
 LABEL maintainer="Vadim Delendik <vdelendik@zebrunner.com>"
