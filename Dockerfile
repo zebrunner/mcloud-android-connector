@@ -13,9 +13,13 @@ RUN mkdir /opt/zebrunner/
 
 WORKDIR /opt/zebrunner/
 
-RUN apk add --no-cache bash ;\
-    apk add --no-cache android-tools --repository=http://dl-cdn.alpinelinux.org/alpine/edge/testing &&\
-    adb --version
+RUN apk add --no-cache bash gcompat libstdc++
+
+RUN wget https://dl.google.com/android/repository/platform-tools_r36.0.1-linux.zip ; \
+  unzip platform-tools_r36.0.1-linux.zip ;\
+  mv platform-tools/adb /usr/local/bin/ ;\
+  rm -rf platform-tools* ;\
+  adb version
 
 COPY bin/ /usr/local/bin/
 COPY util/ /opt/zebrunner/util/
