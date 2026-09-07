@@ -1,24 +1,19 @@
-FROM alpine:3.22.1
+FROM alpine:3.24.1
 # In case of any build errors try to use 'FROM --platform=linux/amd64 ...'
 
-LABEL maintainer="Vadim Delendik <vdelendik@zebrunner.com>"
-
-ENV DEBIAN_FRONTEND=noninteractive \
-    # Android envs
-    ADB_PORT=5037 \
+ENV ADB_PORT=5037 \
     ANDROID_DEVICE='' \
     ADB_POLLING_SEC=5
-
-RUN mkdir /opt/zebrunner/
 
 WORKDIR /opt/zebrunner/
 
 RUN apk add --no-cache bash gcompat libstdc++
 
-RUN wget https://dl.google.com/android/repository/platform-tools_r36.0.1-linux.zip ; \
-  unzip platform-tools_r36.0.1-linux.zip ;\
-  mv platform-tools/adb /usr/local/bin/ ;\
-  rm -rf platform-tools* ;\
+RUN wget https://dl.google.com/android/repository/platform-tools_r37.0.1-linux.zip && \
+  unzip platform-tools_r37.0.1-linux.zip -d /tmp/platform-tools/ && \
+  mv /tmp/platform-tools/adb /usr/local/bin/ && \
+  mv /tmp/platform-tools/libc++.so /usr/local/bin/ && \
+  rm -rf /tmp/platform-tools platform-tools-latest-linux.zip && \
   adb version
 
 COPY bin/ /usr/local/bin/
