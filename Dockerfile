@@ -9,11 +9,11 @@ WORKDIR /opt/zebrunner/
 
 RUN apk add --no-cache bash gcompat libstdc++
 
-RUN wget https://dl.google.com/android/repository/platform-tools_r37.0.1-linux.zip && \
-  unzip platform-tools_r37.0.1-linux.zip -d /tmp/platform-tools && \
+RUN wget -O /tmp/platform-tools.zip https://dl.google.com/android/repository/platform-tools_r37.0.1-linux.zip && \
+  unzip /tmp/platform-tools.zip -d /tmp/ && \
   mv /tmp/platform-tools/adb /usr/local/bin/ && \
-  mv /tmp/platform-tools/libc++.so /usr/local/bin/ && \
-  rm -rf /tmp/platform-tools platform-tools-latest-linux.zip && \
+  mv /tmp/platform-tools/lib64/libc++.so /usr/local/bin/ && \
+  rm -rf /tmp/platform-tools /tmp/platform-tools.zip && \
   adb version
 
 COPY bin/ /usr/local/bin/
