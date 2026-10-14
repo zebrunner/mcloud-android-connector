@@ -12,8 +12,13 @@ PREFIX="mcloud-android-connector-test-$$"
 
 require_cmd docker
 docker info > /dev/null 2>&1 || skip "requires a running docker daemon"
-# shellcheck disable=SC2154
-trap 'status=$?; docker rm --force "${PREFIX}"-server > /dev/null 2>&1; junit_write "$status"; rm -rf "$WORK"' EXIT
+
+# cleanup: removes the container of the adb server checks
+# called by the EXIT trap of lib.sh
+# shellcheck disable=SC2329
+cleanup() {
+  docker rm --force "${PREFIX}-server" > /dev/null 2>&1
+}
 
 # in_image <command...>: runs the command in a new container of the image instead of the entrypoint
 in_image() {
@@ -61,6 +66,8 @@ done
 section "configuration"
 config="$(docker image inspect "$IMAGE" --format '{{json .Config}}')"
 check_contains "entrypoint" '"Entrypoint":["/opt/zebrunner/entrypoint.sh"]' "$config"
+# the literal text of the image configuration
+# shellcheck disable=SC2016
 check_contains "healthcheck checks the device state on ADB_PORT" 'adb -P \"${ADB_PORT}\" get-state' "$config"
 for env in ANDROID_DEVICE= DEVICE_BUS= ADB_PORT=5037 ADB_POLLING_SEC=5 LOGGER_LEVEL=INFO DEBUG=false DEBUG_TIMEOUT=3600 VERBOSE=false; do
   check_contains "default ${env}" "\"${env}\"" "$config"
