@@ -15,12 +15,16 @@ CHROME_APK="${WORK}/zebrunner/chrome/latest.apk"
 # the stubs read their behavior from the FAKE_* variables of the scenario
 export FAKE_WORK="$WORK"
 # usbreset: FAKE_USBRESET=fail can't reset the port
+# the stub body is expanded when the stub runs
+# shellcheck disable=SC2016
 stub usbreset 'echo "usbreset|$*" >> "$FAKE_WORK/calls.log"
 [[ "$FAKE_USBRESET" != fail ]]'
 # sleep: the entrypoint holder sleeps 33 seconds between the device checks, after 20 of them the entrypoint is stopped
 # as a scenario has to end with a state that ends the entrypoint
 # FAKE_SERVER=dies: the pause after the adb server start lets it exit, FAKE_SERVER=crash: the server stops before
 # the second holder check, FAKE_SERVER=crash-on-boot: before the second boot check
+# the stub body is expanded when the stub runs
+# shellcheck disable=SC2016
 stub sleep 'if [[ "$1" == 1 && "$FAKE_SERVER" == dies ]]; then
   /bin/sleep 0.5
 elif [[ "$1" == 33 ]]; then
@@ -40,6 +44,8 @@ exit 0'
 # FAKE_BOOT=ok|never|late (FAKE_BOOT_FAILS empty answers first) the answer of 'adb shell dumpsys display',
 # FAKE_SERVER=crash-on-boot stops the server on the first boot check,
 # FAKE_STATES the ';' separated answers of 'adb get-state', the last one is repeated
+# the stub body is expanded when the stub runs
+# shellcheck disable=SC2016
 stub adb 'echo "adb|$*" >> "$FAKE_WORK/calls.log"
 if [[ "$*" == *" server "* ]]; then
   [[ "$FAKE_SERVER" == dies ]] && exit 1
