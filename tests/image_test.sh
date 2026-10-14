@@ -8,8 +8,12 @@ cd "$REPO" || exit 1
 IMAGE="${IMAGE:-mcloud-android-connector:test}"
 PLATFORM="${PLATFORM:-linux/amd64}"
 
+PREFIX="mcloud-android-connector-test-$$"
+
 require_cmd docker
 docker info > /dev/null 2>&1 || skip "requires a running docker daemon"
+# shellcheck disable=SC2154
+trap 'status=$?; docker rm --force "${PREFIX}"-server > /dev/null 2>&1; junit_write "$status"; rm -rf "$WORK"' EXIT
 
 # in_image <command...>: runs the command in a new container of the image instead of the entrypoint
 in_image() {
@@ -75,6 +79,17 @@ check "unreachable remote device exits with 1" "1" "$STATUS"
 run_image --env ADB_POLLING_SEC=0
 check_contains "missing USB device is reported" "Potentially device is not fully booted yet!" "$OUT"
 check "missing USB device exits with 1" "1" "$STATUS"
+
+# the adb clients would start a server without remote access, so a stopped adb server ends the entrypoint
+docker run --detach --name "${PREFIX}-server" --platform "$PLATFORM" --env ANDROID_DEVICE=127.0.0.1:1 \
+  --env ADB_POLLING_SEC=3 "$IMAGE" > /dev/null
+sleep 5
+docker exec "${PREFIX}-server" pkill -f 'server nodaemon'
+STATUS="$(docker wait "${PREFIX}-server")"
+OUT="$(docker logs "${PREFIX}-server" 2>&1)"
+check_contains "stopped adb server is reported" "Adb server is not running. Restarting!" "$OUT"
+check_not_contains "stopped adb server ends the connect retries" "is not connected!" "$OUT"
+check "stopped adb server exits with 1" "1" "$STATUS"
 
 section "configuration validation"
 run_image --env ADB_PORT=abc

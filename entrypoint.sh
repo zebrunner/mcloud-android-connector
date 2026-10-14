@@ -23,9 +23,20 @@ fi
 # "-a" - allow remote access
 # https://github.com/sorccu/docker-adb
 adb -a -P "$ADB_PORT" server nodaemon &
+adbServerPid=$!
 # the adb client calls below use the same server port
 export ANDROID_ADB_SERVER_PORT="$ADB_PORT"
 sleep 1
+
+# exitIfAdbServerStopped: without the server started above an adb client call starts a new server, but it listens
+# on localhost only, so the device looks fine here while the other containers can't reach it
+exitIfAdbServerStopped() {
+  if ! kill -0 "$adbServerPid" 2> /dev/null; then
+    logger "ERROR" "Adb server is not running. Restarting!"
+    exit 1
+  fi
+}
+exitIfAdbServerStopped
 
 #### ADB connect
 # Via wireless network or via tcp for redroid emulator
@@ -33,6 +44,7 @@ if [[ -n "$ANDROID_DEVICE" ]]; then
   isConnected=0
   declare -i index=0
   while [[ $index -lt 10 ]]; do
+    exitIfAdbServerStopped
     logger "Connecting to: ${ANDROID_DEVICE}"
     adb connect "${ANDROID_DEVICE}"
     # the serial must be exactly ANDROID_DEVICE in the 'device' state: 'device:5555' of Redroid contains 'device' itself
@@ -58,6 +70,7 @@ info=""
 # to support device reboot as device is available by adb but not functioning correctly.
 # this extra dumpsys display call guarantees that android is fully booted (wait up to 5min)
 while [[ "$info" == "" && $index -lt 60 ]]; do
+  exitIfAdbServerStopped
   info=$(adb shell dumpsys display | grep -A 20 DisplayDeviceInfo)
   logger "sleeping ${ADB_POLLING_SEC} seconds..."
   sleep "${ADB_POLLING_SEC}"
@@ -105,6 +118,7 @@ while :; do
     # Possible adb statuses - https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/adb.cpp#118
     # Possible adb statuses2 - https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/proto/devices.proto#25
     # UsbNoPermissionsShortHelpText https://android.googlesource.com/platform/system/core/+/refs/heads/main/diagnose_usb/diagnose_usb.cpp#83
+    exitIfAdbServerStopped
     state=$(adb get-state 2>&1)
     logger --------------
     logger state: "$state"

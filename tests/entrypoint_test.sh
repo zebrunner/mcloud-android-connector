@@ -19,19 +19,35 @@ stub usbreset 'echo "usbreset|$*" >> "$FAKE_WORK/calls.log"
 [[ "$FAKE_USBRESET" != fail ]]'
 # sleep: the entrypoint holder sleeps 33 seconds between the device checks, after 20 of them the entrypoint is stopped
 # as a scenario has to end with a state that ends the entrypoint
-stub sleep 'if [[ "$1" == 33 ]]; then
+# FAKE_SERVER=dies: the pause after the adb server start lets it exit, FAKE_SERVER=crash: the server stops before
+# the second holder check, FAKE_SERVER=crash-on-boot: before the second boot check
+stub sleep 'if [[ "$1" == 1 && "$FAKE_SERVER" == dies ]]; then
+  /bin/sleep 0.5
+elif [[ "$1" == 33 ]]; then
   n=$(cat "$FAKE_WORK/sleep33.n" 2> /dev/null || echo 0)
   echo $((n + 1)) > "$FAKE_WORK/sleep33.n"
   [[ "$n" -ge 20 ]] && kill -TERM "$PPID"
+  if [[ "$FAKE_SERVER" == crash ]]; then
+    touch "$FAKE_WORK/server.stop"
+    /bin/sleep 0.5
+  fi
 fi
 exit 0'
 # adb: every call is logged, the server port (ANDROID_ADB_SERVER_PORT) of the client calls too;
+# the server runs until the entrypoint exits (FAKE_SERVER=dies: it exits at once, server.stop file: it stops);
 # FAKE_CONNECT=ok|fail|flaky (FAKE_CONNECT_FAILS failed attempts first) is the result of 'adb connect',
 # FAKE_DEVICE_STATE the state of the connected device in 'adb devices', FAKE_OTHER_DEVICE one more device there,
 # FAKE_BOOT=ok|never|late (FAKE_BOOT_FAILS empty answers first) the answer of 'adb shell dumpsys display',
+# FAKE_SERVER=crash-on-boot stops the server on the first boot check,
 # FAKE_STATES the ';' separated answers of 'adb get-state', the last one is repeated
 stub adb 'echo "adb|$*" >> "$FAKE_WORK/calls.log"
-[[ "$*" == *" server "* ]] || echo "${ANDROID_ADB_SERVER_PORT:-unset}" >> "$FAKE_WORK/ports.log"
+if [[ "$*" == *" server "* ]]; then
+  [[ "$FAKE_SERVER" == dies ]] && exit 1
+  exec > /dev/null 2>&1
+  while kill -0 "$PPID" 2> /dev/null && [[ ! -e "$FAKE_WORK/server.stop" ]]; do /bin/sleep 0.1; done
+  exit 0
+fi
+echo "${ANDROID_ADB_SERVER_PORT:-unset}" >> "$FAKE_WORK/ports.log"
 counter() {
   local n
   n=$(cat "$FAKE_WORK/$1.n" 2> /dev/null || echo 0)
@@ -55,6 +71,10 @@ case "$1" in
     case "$*" in
       *dumpsys\ display*)
         n=$(counter boot)
+        if [[ "$FAKE_SERVER" == crash-on-boot ]]; then
+          touch "$FAKE_WORK/server.stop"
+          /bin/sleep 0.5
+        fi
         if [[ "$FAKE_BOOT" == never || ("$FAKE_BOOT" == late && "$n" -lt "$FAKE_BOOT_FAILS") ]]; then
           exit 1
         fi
@@ -72,7 +92,7 @@ exit 0'
 
 # scenario <name>: a fresh state, a booted USB device that becomes unauthorized after the first holder check by default
 scenario() {
-  rm -rf "${WORK}"/*.n "${WORK}/connected" "${WORK}/ports.log" "${WORK}/node_modules" "${WORK}/zebrunner"
+  rm -rf "${WORK}"/*.n "${WORK}/connected" "${WORK}/ports.log" "${WORK}/server.stop" "${WORK}/node_modules" "${WORK}/zebrunner"
   reset_calls
   FAKE_CONNECT=ok
   FAKE_CONNECT_FAILS=0
@@ -82,7 +102,8 @@ scenario() {
   FAKE_BOOT_FAILS=0
   FAKE_STATES="device;unauthorized"
   FAKE_USBRESET=ok
-  export FAKE_CONNECT FAKE_CONNECT_FAILS FAKE_DEVICE_STATE FAKE_OTHER_DEVICE FAKE_BOOT FAKE_BOOT_FAILS FAKE_STATES FAKE_USBRESET
+  FAKE_SERVER=ok
+  export FAKE_SERVER FAKE_CONNECT FAKE_CONNECT_FAILS FAKE_DEVICE_STATE FAKE_OTHER_DEVICE FAKE_BOOT FAKE_BOOT_FAILS FAKE_STATES FAKE_USBRESET
   export ANDROID_DEVICE='' DEVICE_BUS=/dev/bus/usb/001/002 ADB_PORT=5037 ADB_POLLING_SEC=0 LOGGER_LEVEL=DEBUG
   unset DEBUG VERBOSE ANDROID_ADB_SERVER_PORT
 }
@@ -156,6 +177,29 @@ ADB_PORT=5038
 run_entrypoint
 check "adb server uses ADB_PORT" "-a -P 5038 server nodaemon" "$(calls adb | grep ' server ')"
 check "adb clients use ADB_PORT" "5038" "$(sort -u "${WORK}/ports.log" | tr '\n' ' ' | sed 's/ $//')"
+
+scenario
+FAKE_SERVER=dies
+run_entrypoint
+check_contains "adb server that can't start is reported" "Adb server is not running. Restarting!" "$OUT"
+check "adb server that can't start exits with 1" "1" "$STATUS"
+check_not_contains "the device is not checked without the adb server" "dumpsys" "$(calls adb)"
+
+scenario
+FAKE_SERVER=crash
+FAKE_STATES="device"
+run_entrypoint
+check "the device is checked while the adb server runs" "1" "$(count 'Device connected successfully.' "$OUT")"
+check_contains "stopped adb server is reported" "Adb server is not running. Restarting!" "$OUT"
+check "stopped adb server exits with 1" "1" "$STATUS"
+
+scenario
+FAKE_SERVER=crash-on-boot
+FAKE_BOOT=never
+run_entrypoint
+check "the boot wait ends when the adb server stops" "1" "$(cat "${WORK}/boot.n")"
+check_contains "adb server stopped during the boot wait is reported" "Adb server is not running. Restarting!" "$OUT"
+check "adb server stopped during the boot wait exits with 1" "1" "$STATUS"
 
 section "USB device"
 scenario

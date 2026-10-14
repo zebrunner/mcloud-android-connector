@@ -65,9 +65,11 @@ device authorized over the container recreations.
   state that needs troubleshooting (`recovery`, `rescue`, `sideload`, no
   permissions, ...), or a device that stays in a temporary state (`authorizing`,
   `connecting`, `unknown`, `bootloader`) for 10 checks.
-- Exit code `1` asks for a restart: the remote device can't be connected or is
-  lost, the device is not fully booted, or the USB device is lost and its port
-  can't be reset with `usbreset`.
+- Exit code `1` asks for a restart: the adb server is not running (an adb client
+  call would start a new one without remote access, so it is checked during the
+  startup and before every device check), the remote device can't be connected
+  or is lost, the device is not fully booted, or the USB device is lost and its
+  port can't be reset with `usbreset`.
 - An `offline` device is reconnected with `adb reconnect`, a lost USB device
   gets its `DEVICE_BUS` port reset, the checks go on after that.
 - The image healthcheck expects `adb -P ${ADB_PORT} get-state` to return `device`.
@@ -81,8 +83,8 @@ device authorized over the container recreations.
 | Target | What it does |
 | --- | --- |
 | `make lint` | `tests/lint.sh`: yamllint, actionlint, hadolint, pymarkdown, `bash -n`, ShellCheck and shfmt (style of `.editorconfig`). The tools are installed into `.venv` from `tests/requirements-lint.txt`; hadolint comes from `brew install hadolint` on macOS. |
-| `make test` | The static checks of the repository (`tests/repo_test.sh`: the pins of the `Dockerfile`, the Dependabot configuration) and the tests of `util/logger.sh`, `util/debug.sh` and `entrypoint.sh`: configuration validation, the adb server port, USB and remote devices, the boot wait, the Redroid emulator extras, every device state of the holder with its retry limits, the `DEBUG` and `VERBOSE` modes. The tools are stubs (`adb`, `usbreset`, `sleep`), so no docker and no Android device are needed, but bash 4+ is (on macOS `brew install bash`). |
-| `make docker` | `tests/image_test.sh`: builds the image (`linux/amd64`, `IMAGE` overrides its tag, `REBUILD=true` rebuilds it), checks its contents, the installed versions of the pinned packages, configuration, configuration validation and the entrypoint startup without a device. |
+| `make test` | The static checks of the repository (`tests/repo_test.sh`: the pins of the `Dockerfile`, the Dependabot configuration) and the tests of `util/logger.sh`, `util/debug.sh` and `entrypoint.sh`: configuration validation, the adb server port and its liveness, USB and remote devices, the boot wait, the Redroid emulator extras, every device state of the holder with its retry limits, the `DEBUG` and `VERBOSE` modes. The tools are stubs (`adb`, `usbreset`, `sleep`), so no docker and no Android device are needed, but bash 4+ is (on macOS `brew install bash`). |
+| `make docker` | `tests/image_test.sh`: builds the image (`linux/amd64`, `IMAGE` overrides its tag, `REBUILD=true` rebuilds it), checks its contents, the installed versions of the pinned packages, configuration, configuration validation and the entrypoint startup without a device, also with a stopped adb server. |
 
 Every test script prints its checks and writes JUnit XML into `JUNIT_DIR` when it is set.
 
