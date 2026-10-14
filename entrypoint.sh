@@ -5,13 +5,38 @@
 
 logger "INFO" "\n\n\n\t\tMCLOUD-ANDROID-CONNECTOR\n\n"
 
+#### Validate configuration
+# A wrong configuration can't be fixed by a restart, so exit with 0 like the other unrecoverable errors
+isConfigValid=1
+for var in ADB_PORT ADB_POLLING_SEC; do
+  if [[ ! "${!var}" =~ ^[0-9]+$ ]]; then
+    logger "ERROR" "$var must be a non-negative integer, but it is '${!var}'."
+    isConfigValid=0
+  fi
+done
+if [[ $isConfigValid -eq 0 ]]; then
+  logger "ERROR" "Invalid configuration. Exiting!"
+  exit 0
+fi
 
 #### Start ADB
 # "-a" - allow remote access
 # https://github.com/sorccu/docker-adb
-adb -a -P 5037 server nodaemon &
+adb -a -P "$ADB_PORT" server nodaemon &
+adbServerPid=$!
+# the adb client calls below use the same server port
+export ANDROID_ADB_SERVER_PORT="$ADB_PORT"
 sleep 1
 
+# exitIfAdbServerStopped: without the server started above an adb client call starts a new server, but it listens
+# on localhost only, so the device looks fine here while the other containers can't reach it
+exitIfAdbServerStopped() {
+  if ! kill -0 "$adbServerPid" 2> /dev/null; then
+    logger "ERROR" "Adb server is not running. Restarting!"
+    exit 1
+  fi
+}
+exitIfAdbServerStopped
 
 #### ADB connect
 # Via wireless network or via tcp for redroid emulator
@@ -19,9 +44,11 @@ if [[ -n "$ANDROID_DEVICE" ]]; then
   isConnected=0
   declare -i index=0
   while [[ $index -lt 10 ]]; do
+    exitIfAdbServerStopped
     logger "Connecting to: ${ANDROID_DEVICE}"
     adb connect "${ANDROID_DEVICE}"
-    if adb devices | grep "${ANDROID_DEVICE}" | grep "device"; then
+    # the serial must be exactly ANDROID_DEVICE in the 'device' state: 'device:5555' of Redroid contains 'device' itself
+    if adb devices | awk -v serial="${ANDROID_DEVICE}" '$1 == serial && $2 == "device" { print; found = 1 } END { exit !found }'; then
       isConnected=1
       logger "Connected: ${ANDROID_DEVICE}"
       break
@@ -37,13 +64,13 @@ if [[ -n "$ANDROID_DEVICE" ]]; then
   fi
 fi
 
-
 #### Make sure device is fully booted
 declare -i index=0
 info=""
 # to support device reboot as device is available by adb but not functioning correctly.
 # this extra dumpsys display call guarantees that android is fully booted (wait up to 5min)
 while [[ "$info" == "" && $index -lt 60 ]]; do
+  exitIfAdbServerStopped
   info=$(adb shell dumpsys display | grep -A 20 DisplayDeviceInfo)
   logger "sleeping ${ADB_POLLING_SEC} seconds..."
   sleep "${ADB_POLLING_SEC}"
@@ -57,10 +84,8 @@ else
   logger "info: $info"
 fi
 
-
 #### Print device filesystem usage statistics
 adb shell df -h
-
 
 #### Extra steps for Zebrunner Redroid Emulator
 if [[ "$ANDROID_DEVICE" == "device:5555" ]]; then
@@ -84,7 +109,6 @@ fi
 
 logger "Device is fully available."
 
-
 #### Entrypoint holder
 while :; do
   isAvailable=0
@@ -94,6 +118,7 @@ while :; do
     # Possible adb statuses - https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/adb.cpp#118
     # Possible adb statuses2 - https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/proto/devices.proto#25
     # UsbNoPermissionsShortHelpText https://android.googlesource.com/platform/system/core/+/refs/heads/main/diagnose_usb/diagnose_usb.cpp#83
+    exitIfAdbServerStopped
     state=$(adb get-state 2>&1)
     logger --------------
     logger state: "$state"
