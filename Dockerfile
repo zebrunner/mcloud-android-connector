@@ -36,6 +36,7 @@ ARG VERSION=dev
 LABEL org.opencontainers.image.title="Zebrunner MCloud Android Connector" \
       org.opencontainers.image.description="The adb server of an Android device of Zebrunner MCloud" \
       org.opencontainers.image.source="https://github.com/zebrunner/mcloud-android-connector" \
+      org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${VERSION}"
 
 ENTRYPOINT ["/opt/zebrunner/entrypoint.sh"]
