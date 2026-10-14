@@ -1,5 +1,5 @@
 #!/bin/bash
-# Static checks of the repository files, no docker: the pinned versions of the Dockerfile.
+# Static checks of the repository files, no docker: the pinned versions of the Dockerfile and the Dependabot configuration.
 source "$(dirname "$0")/lib.sh"
 cd "$REPO" || exit 1
 
@@ -32,5 +32,16 @@ fi
 sums="$(grep -cE '^ *echo "[0-9a-f]{64}  [^"]+" > ' Dockerfile || true)"
 check "the downloaded platform-tools archive has a sha256 checksum" "1" "$sums"
 check_contains "the checksum is checked" "sha256sum -c" "$(cat Dockerfile)"
+
+section "Dependabot"
+config=".github/dependabot.yml"
+for ecosystem in github-actions docker pip; do
+  check_contains "${ecosystem} is updated" "package-ecosystem: ${ecosystem}" "$(cat "$config")"
+done
+check_contains "pip reads tests/requirements-lint.txt" "directory: /tests" "$(cat "$config")"
+check "tests/requirements-lint.txt exists" "true" "$([[ -f tests/requirements-lint.txt ]] && echo true || echo false)"
+# the pinned linters: name==version
+unpinned="$(grep -vE '^(#|$)' tests/requirements-lint.txt | grep -vE '^[A-Za-z0-9._-]+==[0-9][A-Za-z0-9.]*$' || true)"
+check "every linter is pinned as name==version" "" "$unpinned"
 
 finish

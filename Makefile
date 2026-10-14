@@ -12,7 +12,7 @@ help: ## this list
 check: ## everything below, as CI runs it; every step runs, the failed ones fail the target
 	@status=0; for target in lint test docker; do $(MAKE) --no-print-directory $$target || status=1; done; exit $$status
 
-lint: $(VENV)/.installed ## the linters (tests/lint.sh): yaml, Dockerfile, markdown, shell
+lint: $(VENV)/.installed ## the linters (tests/lint.sh): yaml, workflows, Dockerfile, markdown, shell
 	tests/lint.sh
 
 test: ## all tests/*_test.sh but the docker one: the util scripts and the entrypoint, no docker needed

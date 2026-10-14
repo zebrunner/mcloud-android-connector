@@ -17,7 +17,7 @@ lint() {
 }
 
 missing=""
-for tool in hadolint pymarkdown shellcheck shfmt yamllint; do
+for tool in actionlint hadolint pymarkdown shellcheck shfmt yamllint; do
   command -v "$tool" > /dev/null 2>&1 || missing="${missing} ${tool}"
 done
 if [[ -n "$missing" ]]; then
@@ -28,6 +28,10 @@ fi
 
 section "yaml"
 lint "yamllint" yamllint --strict .
+
+section "GitHub workflows"
+# the files are listed: actionlint looks for the project by .git otherwise, and the sources may come without it
+lint "actionlint" actionlint .github/workflows/*.yml
 
 section "Dockerfile"
 lint "hadolint" hadolint Dockerfile
