@@ -5,13 +5,11 @@
 
 logger "INFO" "\n\n\n\t\tMCLOUD-ANDROID-CONNECTOR\n\n"
 
-
 #### Start ADB
 # "-a" - allow remote access
 # https://github.com/sorccu/docker-adb
 adb -a -P 5037 server nodaemon &
 sleep 1
-
 
 #### ADB connect
 # Via wireless network or via tcp for redroid emulator
@@ -37,7 +35,6 @@ if [[ -n "$ANDROID_DEVICE" ]]; then
   fi
 fi
 
-
 #### Make sure device is fully booted
 declare -i index=0
 info=""
@@ -57,10 +54,8 @@ else
   logger "info: $info"
 fi
 
-
 #### Print device filesystem usage statistics
 adb shell df -h
-
 
 #### Extra steps for Zebrunner Redroid Emulator
 if [[ "$ANDROID_DEVICE" == "device:5555" ]]; then
@@ -83,7 +78,6 @@ if [[ "$ANDROID_DEVICE" == "device:5555" ]]; then
 fi
 
 logger "Device is fully available."
-
 
 #### Entrypoint holder
 while :; do
