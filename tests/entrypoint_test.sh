@@ -27,6 +27,7 @@ fi
 exit 0'
 # adb: every call is logged, the server port (ANDROID_ADB_SERVER_PORT) of the client calls too;
 # FAKE_CONNECT=ok|fail|flaky (FAKE_CONNECT_FAILS failed attempts first) is the result of 'adb connect',
+# FAKE_DEVICE_STATE the state of the connected device in 'adb devices', FAKE_OTHER_DEVICE one more device there,
 # FAKE_BOOT=ok|never|late (FAKE_BOOT_FAILS empty answers first) the answer of 'adb shell dumpsys display',
 # FAKE_STATES the ';' separated answers of 'adb get-state', the last one is repeated
 stub adb 'echo "adb|$*" >> "$FAKE_WORK/calls.log"
@@ -48,7 +49,8 @@ case "$1" in
     fi ;;
   devices)
     echo "List of devices attached"
-    [[ -e "$FAKE_WORK/connected" ]] && printf "%s\tdevice\n" "$ANDROID_DEVICE" ;;
+    [[ -n "$FAKE_OTHER_DEVICE" ]] && printf "%s\tdevice\n" "$FAKE_OTHER_DEVICE"
+    [[ -e "$FAKE_WORK/connected" ]] && printf "%s\t%s\n" "$ANDROID_DEVICE" "$FAKE_DEVICE_STATE" ;;
   shell)
     case "$*" in
       *dumpsys\ display*)
@@ -74,11 +76,13 @@ scenario() {
   reset_calls
   FAKE_CONNECT=ok
   FAKE_CONNECT_FAILS=0
+  FAKE_DEVICE_STATE=device
+  FAKE_OTHER_DEVICE=''
   FAKE_BOOT=ok
   FAKE_BOOT_FAILS=0
   FAKE_STATES="device;unauthorized"
   FAKE_USBRESET=ok
-  export FAKE_CONNECT FAKE_CONNECT_FAILS FAKE_BOOT FAKE_BOOT_FAILS FAKE_STATES FAKE_USBRESET
+  export FAKE_CONNECT FAKE_CONNECT_FAILS FAKE_DEVICE_STATE FAKE_OTHER_DEVICE FAKE_BOOT FAKE_BOOT_FAILS FAKE_STATES FAKE_USBRESET
   export ANDROID_DEVICE='' DEVICE_BUS=/dev/bus/usb/001/002 ADB_PORT=5037 ADB_POLLING_SEC=0 LOGGER_LEVEL=DEBUG
   unset DEBUG VERBOSE ANDROID_ADB_SERVER_PORT
 }
@@ -186,6 +190,24 @@ check "unreachable remote device is retried 10 times" "10" "$(cat "${WORK}/conne
 check_contains "unreachable remote device is reported" "Device 192.168.0.10:5555 is not connected!" "$OUT"
 check "unreachable remote device exits with 1" "1" "$STATUS"
 check_not_contains "boot is not checked without connection" "dumpsys" "$(calls adb)"
+
+for state in offline unauthorized authorizing; do
+  scenario
+  ANDROID_DEVICE=device:5555
+  FAKE_DEVICE_STATE=$state
+  run_entrypoint
+  check "${state} Redroid emulator is not connected" "10" "$(cat "${WORK}/connect.n")"
+  check_not_contains "${state} Redroid emulator is not reported as connected" "Connected: device:5555" "$OUT"
+  check "${state} Redroid emulator exits with 1" "1" "$STATUS"
+done
+
+scenario
+ANDROID_DEVICE=192.168.0.10:5555
+FAKE_DEVICE_STATE=offline
+FAKE_OTHER_DEVICE=192.168.0.10:55555
+run_entrypoint
+check_not_contains "another device with the same serial prefix is not the remote device" "Connected: 192.168.0.10:5555" "$OUT"
+check "remote device with the same serial prefix exits with 1" "1" "$STATUS"
 
 section "boot"
 scenario

@@ -35,7 +35,8 @@ if [[ -n "$ANDROID_DEVICE" ]]; then
   while [[ $index -lt 10 ]]; do
     logger "Connecting to: ${ANDROID_DEVICE}"
     adb connect "${ANDROID_DEVICE}"
-    if adb devices | grep "${ANDROID_DEVICE}" | grep "device"; then
+    # the serial must be exactly ANDROID_DEVICE in the 'device' state: 'device:5555' of Redroid contains 'device' itself
+    if adb devices | awk -v serial="${ANDROID_DEVICE}" '$1 == serial && $2 == "device" { print; found = 1 } END { exit !found }'; then
       isConnected=1
       logger "Connected: ${ANDROID_DEVICE}"
       break
