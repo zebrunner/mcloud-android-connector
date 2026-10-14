@@ -35,4 +35,4 @@ COPY entrypoint.sh /opt/zebrunner/
 ENTRYPOINT ["/opt/zebrunner/entrypoint.sh"]
 
 HEALTHCHECK --interval=20s --timeout=5s --start-period=120s --start-interval=10s --retries=3 \
-    CMD ["sh", "-c", "[ \"$(adb get-state 2>&1)\" = device ]"]
+    CMD ["sh", "-c", "[ \"$(adb -P \"${ADB_PORT}\" get-state 2>&1)\" = device ]"]

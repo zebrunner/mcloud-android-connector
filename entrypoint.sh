@@ -5,10 +5,26 @@
 
 logger "INFO" "\n\n\n\t\tMCLOUD-ANDROID-CONNECTOR\n\n"
 
+#### Validate configuration
+# A wrong configuration can't be fixed by a restart, so exit with 0 like the other unrecoverable errors
+isConfigValid=1
+for var in ADB_PORT ADB_POLLING_SEC; do
+  if [[ ! "${!var}" =~ ^[0-9]+$ ]]; then
+    logger "ERROR" "$var must be a non-negative integer, but it is '${!var}'."
+    isConfigValid=0
+  fi
+done
+if [[ $isConfigValid -eq 0 ]]; then
+  logger "ERROR" "Invalid configuration. Exiting!"
+  exit 0
+fi
+
 #### Start ADB
 # "-a" - allow remote access
 # https://github.com/sorccu/docker-adb
-adb -a -P 5037 server nodaemon &
+adb -a -P "$ADB_PORT" server nodaemon &
+# the adb client calls below use the same server port
+export ANDROID_ADB_SERVER_PORT="$ADB_PORT"
 sleep 1
 
 #### ADB connect
