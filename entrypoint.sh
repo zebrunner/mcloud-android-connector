@@ -7,10 +7,25 @@
 
 logger "INFO" "\n\n\n\t\tMCLOUD-ANDROID-CONNECTOR\n\n"
 
+# the port of the host forwarded to adbd of the USB device of ADB_TRANSPORT_SERVER, 5555 like adbd itself by default
+ADB_TRANSPORT_PORT="${ADB_TRANSPORT_PORT:-5555}"
+
 #### Validate configuration
 # A wrong configuration can't be fixed by a restart, so exit with 0 like the other unrecoverable errors
 isConfigValid=1
-for var in ADB_PORT ADB_POLLING_SEC; do
+numericVars=(ADB_PORT ADB_POLLING_SEC)
+if [[ -n "$ADB_TRANSPORT_SERVER" ]]; then
+  numericVars+=(ADB_TRANSPORT_PORT)
+  if [[ ! "$ADB_TRANSPORT_SERVER" =~ ^[^:]+:[0-9]+$ ]]; then
+    logger "ERROR" "ADB_TRANSPORT_SERVER must be <host>:<port>, but it is '${ADB_TRANSPORT_SERVER}'."
+    isConfigValid=0
+  fi
+  if [[ -z "$ADB_TRANSPORT_SERIAL" ]]; then
+    logger "ERROR" "ADB_TRANSPORT_SERIAL is required with ADB_TRANSPORT_SERVER."
+    isConfigValid=0
+  fi
+fi
+for var in "${numericVars[@]}"; do
   if [[ ! "${!var}" =~ ^[0-9]+$ ]]; then
     logger "ERROR" "$var must be a non-negative integer, but it is '${!var}'."
     isConfigValid=0
@@ -40,8 +55,55 @@ exitIfAdbServerStopped() {
 }
 exitIfAdbServerStopped
 
+#### USB device of the host adb server
+# Docker of macOS has no USB: the device stays on the adb server of the host, its adbd listens on tcp:5555 and the
+# server forwards ADB_TRANSPORT_PORT of the host to it, so the device is connected below like a remote one and the
+# adb server of the container stays the only one of the device (the forwards of Appium are in the container)
+if [[ -n "$ADB_TRANSPORT_SERVER" ]]; then
+  transportHost="${ADB_TRANSPORT_SERVER%:*}"
+  transportPort="${ADB_TRANSPORT_SERVER##*:}"
+  # transportAdb <args>: adb of the host server for the USB device
+  transportAdb() {
+    adb -H "$transportHost" -P "$transportPort" -s "$ADB_TRANSPORT_SERIAL" "$@"
+  }
+  # waitTransportDevice: waits for the device on the host server, exits when it is unauthorized or missing
+  waitTransportDevice() {
+    local state
+    declare -i index=0
+    while [[ $index -lt 10 ]]; do
+      state=$(transportAdb get-state 2>&1)
+      logger "Device '${ADB_TRANSPORT_SERIAL}' on the adb server ${ADB_TRANSPORT_SERVER}: ${state}"
+      case $state in
+      "device") return 0 ;;
+      *"unauthorized"*)
+        logger "WARN" "Authorize the adb server of the host on the device manually!"
+        exit 0
+        ;;
+      esac
+      sleep "${ADB_POLLING_SEC}"
+      index+=1
+    done
+    logger "ERROR" "Device '${ADB_TRANSPORT_SERIAL}' is not found on the adb server ${ADB_TRANSPORT_SERVER}. Restarting!"
+    exit 1
+  }
+
+  waitTransportDevice
+  if [[ "$(transportAdb shell getprop service.adb.tcp.port 2> /dev/null | tr -d '\r')" != "5555" ]]; then
+    logger "Switching adbd of the device to tcp:5555."
+    transportAdb tcpip 5555
+    sleep "${ADB_POLLING_SEC}"
+    waitTransportDevice
+  fi
+  if ! transportAdb forward "tcp:${ADB_TRANSPORT_PORT}" tcp:5555; then
+    logger "ERROR" "The adb server ${ADB_TRANSPORT_SERVER} can't forward the port ${ADB_TRANSPORT_PORT}. Restarting!"
+    exit 1
+  fi
+  ANDROID_DEVICE="${transportHost}:${ADB_TRANSPORT_PORT}"
+  logger "The device is forwarded by the adb server of the host to ${ANDROID_DEVICE}."
+fi
+
 #### ADB connect
-# Via wireless network or via tcp for redroid emulator
+# Via wireless network, via tcp for redroid emulator or via the adb server of the host
 if [[ -n "$ANDROID_DEVICE" ]]; then
   isConnected=0
   declare -i index=0

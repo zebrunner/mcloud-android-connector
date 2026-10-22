@@ -47,6 +47,22 @@ exit 0'
 # the stub body is expanded when the stub runs
 # shellcheck disable=SC2016
 stub adb 'echo "adb|$*" >> "$FAKE_WORK/calls.log"
+# the adb server of the host (-H): FAKE_TRANSPORT_STATES the ";" separated answers of get-state, the last one is
+# repeated, FAKE_TCP_PORT the tcp port of adbd, FAKE_FORWARD=fail can not forward
+if [[ "$1" == -H ]]; then
+  shift 6
+  case "$1" in
+    get-state)
+      n=$(cat "$FAKE_WORK/transport.n" 2> /dev/null || echo 0)
+      echo $((n + 1)) > "$FAKE_WORK/transport.n"
+      IFS=";" read -r -a states <<< "$FAKE_TRANSPORT_STATES"
+      [[ "$n" -ge "${#states[@]}" ]] && n=$((${#states[@]} - 1))
+      echo "${states[$n]}" ;;
+    shell) echo "${FAKE_TCP_PORT}" ;;
+    forward) [[ "$FAKE_FORWARD" == fail ]] && { echo "error: cannot bind listener"; exit 1; } ;;
+  esac
+  exit 0
+fi
 if [[ "$*" == *" server "* ]]; then
   [[ "$FAKE_SERVER" == dies ]] && exit 1
   exec > /dev/null 2>&1
@@ -109,9 +125,13 @@ scenario() {
   FAKE_STATES="device;unauthorized"
   FAKE_USBRESET=ok
   FAKE_SERVER=ok
+  FAKE_TRANSPORT_STATES=device
+  FAKE_TCP_PORT=''
+  FAKE_FORWARD=ok
+  export FAKE_TRANSPORT_STATES FAKE_TCP_PORT FAKE_FORWARD
   export FAKE_SERVER FAKE_CONNECT FAKE_CONNECT_FAILS FAKE_DEVICE_STATE FAKE_OTHER_DEVICE FAKE_BOOT FAKE_BOOT_FAILS FAKE_STATES FAKE_USBRESET
   export ANDROID_DEVICE='' DEVICE_BUS=/dev/bus/usb/001/002 ADB_PORT=5037 ADB_POLLING_SEC=0 LOGGER_LEVEL=DEBUG
-  unset DEBUG VERBOSE ANDROID_ADB_SERVER_PORT
+  unset DEBUG VERBOSE ANDROID_ADB_SERVER_PORT ADB_TRANSPORT_SERVER ADB_TRANSPORT_SERIAL ADB_TRANSPORT_PORT
 }
 
 # run_entrypoint: output of the entrypoint in $OUT, its exit status in $STATUS
@@ -258,6 +278,79 @@ FAKE_OTHER_DEVICE=192.168.0.10:55555
 run_entrypoint
 check_not_contains "another device with the same serial prefix is not the remote device" "Connected: 192.168.0.10:5555" "$OUT"
 check "remote device with the same serial prefix exits with 1" "1" "$STATUS"
+
+section "USB device of the adb server of the host"
+scenario
+export ADB_TRANSPORT_SERVER=host.docker.internal:5037 ADB_TRANSPORT_SERIAL=R28M1384YQY ADB_TRANSPORT_PORT=7422
+run_entrypoint
+check_contains "the device is awaited on the host server" "adb|-H host.docker.internal -P 5037 -s R28M1384YQY get-state" "$(cat "${WORK}/calls.log")"
+check_contains "adbd of the device is switched to tcp" "-s R28M1384YQY tcpip 5555" "$(calls adb)"
+check_contains "the host server forwards the port to adbd" "-s R28M1384YQY forward tcp:7422 tcp:5555" "$(calls adb)"
+check_contains "the forwarded port is connected" "connect host.docker.internal:7422" "$(calls adb)"
+check_contains "the forwarded device is reported" "The device is forwarded by the adb server of the host to host.docker.internal:7422." "$OUT"
+check_contains "the forwarded device boots" "DisplayDeviceInfo" "$OUT"
+
+scenario
+export ADB_TRANSPORT_SERVER=host.docker.internal:5037 ADB_TRANSPORT_SERIAL=R28M1384YQY ADB_TRANSPORT_PORT=7422
+FAKE_TCP_PORT=5555
+run_entrypoint
+check_not_contains "adbd already on tcp is not switched again" "tcpip" "$(calls adb)"
+check_contains "adbd already on tcp is forwarded" "forward tcp:7422 tcp:5555" "$(calls adb)"
+
+scenario
+export ADB_TRANSPORT_SERVER=host.docker.internal:5037 ADB_TRANSPORT_SERIAL=R28M1384YQY
+FAKE_TRANSPORT_STATES="error: device 'R28M1384YQY' not found;error: device 'R28M1384YQY' not found;device"
+FAKE_TCP_PORT=5555
+run_entrypoint
+check "the device is polled on the host server until it appears" "3" "$(cat "${WORK}/transport.n")"
+check_contains "the default port is forwarded" "forward tcp:5555 tcp:5555" "$(calls adb)"
+
+scenario
+export ADB_TRANSPORT_SERVER=host.docker.internal:5037 ADB_TRANSPORT_SERIAL=R28M1384YQY
+FAKE_TRANSPORT_STATES="error: device 'R28M1384YQY' not found"
+run_entrypoint
+check_contains "missing device of the host server is reported" "is not found on the adb server host.docker.internal:5037. Restarting!" "$OUT"
+check "missing device of the host server is polled 10 times" "10" "$(cat "${WORK}/transport.n")"
+check "missing device of the host server exits with 1" "1" "$STATUS"
+check_not_contains "missing device of the host server is not connected" "connect" "$(calls adb)"
+
+scenario
+export ADB_TRANSPORT_SERVER=host.docker.internal:5037 ADB_TRANSPORT_SERIAL=R28M1384YQY
+FAKE_TRANSPORT_STATES=unauthorized
+run_entrypoint
+check_contains "unauthorized host server is reported" "Authorize the adb server of the host on the device manually!" "$OUT"
+check "unauthorized host server exits with 0" "0" "$STATUS"
+
+scenario
+export ADB_TRANSPORT_SERVER=host.docker.internal:5037 ADB_TRANSPORT_SERIAL=R28M1384YQY
+FAKE_FORWARD=fail
+run_entrypoint
+check_contains "failed forward is reported" "can't forward the port 5555. Restarting!" "$OUT"
+check "failed forward exits with 1" "1" "$STATUS"
+
+for value in host.docker.internal "host:port" ":5037"; do
+  scenario
+  export ADB_TRANSPORT_SERVER="$value" ADB_TRANSPORT_SERIAL=R28M1384YQY
+  run_entrypoint
+  check_contains "ADB_TRANSPORT_SERVER='${value}' is reported" "ADB_TRANSPORT_SERVER must be <host>:<port>, but it is '${value}'." "$OUT"
+  check "ADB_TRANSPORT_SERVER='${value}' exits with 0" "0" "$STATUS"
+done
+
+scenario
+export ADB_TRANSPORT_SERVER=host.docker.internal:5037 ADB_TRANSPORT_SERIAL=''
+run_entrypoint
+check_contains "the serial is required with the host server" "ADB_TRANSPORT_SERIAL is required with ADB_TRANSPORT_SERVER." "$OUT"
+
+scenario
+export ADB_TRANSPORT_SERVER=host.docker.internal:5037 ADB_TRANSPORT_SERIAL=R28M1384YQY ADB_TRANSPORT_PORT=abc
+run_entrypoint
+check_contains "invalid ADB_TRANSPORT_PORT is reported" "ADB_TRANSPORT_PORT must be a non-negative integer, but it is 'abc'." "$OUT"
+
+scenario
+export ADB_TRANSPORT_PORT=abc
+FAKE_STATES="unauthorized"
+run_entrypoint
+check_not_contains "ADB_TRANSPORT_PORT is not validated without the host server" "ADB_TRANSPORT_PORT must be" "$OUT"
 
 section "boot"
 scenario

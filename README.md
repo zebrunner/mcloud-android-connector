@@ -1,6 +1,6 @@
 # Zebrunner Device Connector
 
-The Zebrunner Device Connector is a lightweight Docker image that exposes an Android device over adb. It starts an adb server with remote access, connects a remote device (Wi-Fi or the Redroid emulator) when needed, waits until the device is fully booted and monitors the device state.
+The Zebrunner Device Connector is a lightweight Docker image that exposes an Android device over adb. It starts an adb server with remote access, connects a remote device (Wi-Fi, the Redroid emulator or the USB device of the adb server of a macOS host) when needed, waits until the device is fully booted and monitors the device state. Its adb server is the only one of the device: the Appium and STF containers use it (`connector:5037`).
 
 The image is based on Alpine and runs on `linux/amd64` only (it contains the amd64 builds of `adb` from the Android [platform-tools](https://developer.android.com/tools/releases/platform-tools) 37.0.1 and of `usbreset`).
 
@@ -24,6 +24,9 @@ Set these environment variables when starting the container. The entrypoint vali
 | `DEVICE_BUS` | empty | USB device path (for example `/dev/bus/usb/001/002`) that is reset with `usbreset` when the USB device is lost. |
 | `ADB_PORT` | `5037` | Port of the adb server; the entrypoint and the healthcheck use the same port. |
 | `ADB_POLLING_SEC` | `5` | Delay in seconds between the connection, boot and device state checks. |
+| `ADB_TRANSPORT_SERVER` | empty | The adb server (`host:port`, e.g. `host.docker.internal:5037`) that has the USB device: Docker of macOS has no USB, see [USB device of a macOS host](#usb-device-of-a-macos-host). |
+| `ADB_TRANSPORT_SERIAL` | empty | The serial of the USB device on `ADB_TRANSPORT_SERVER` (required with it). |
+| `ADB_TRANSPORT_PORT` | `5555` | The port of the host that `ADB_TRANSPORT_SERVER` forwards to adbd of the device, unique for every device of the host. |
 | `LOGGER_LEVEL` | `INFO` | Minimum log level: `DEBUG`, `INFO`, `WARN`, or `ERROR`. |
 | `DEBUG` | `false` | Intercept script exit and wait for `DEBUG_TIMEOUT` seconds. |
 | `DEBUG_TIMEOUT` | `3600` | Debug exit pause duration in seconds. |
@@ -31,18 +34,23 @@ Set these environment variables when starting the container. The entrypoint vali
 
 A USB device must be passed into the container (for example with `--device`). The adb keys are kept in `/root/.android`, mount a volume there to keep the device authorized over the container recreations.
 
+## USB device of a macOS host
+
+Docker of macOS has no USB, so a USB device stays on the adb server of the host (`adb -a -P 5037 server nodaemon`, mcloud-agent runs it as a launch agent) and the container takes it from there, the host runs no device commands itself. With `ADB_TRANSPORT_SERVER` the entrypoint waits for `ADB_TRANSPORT_SERIAL` on that server (an unauthorized device exits with `0`: authorize the host on the device), switches adbd of the device to `tcp:5555` when it is not there yet (`adb tcpip 5555`, it is reset by a reboot of the device and done again by the restart), forwards `ADB_TRANSPORT_PORT` of the host to it and connects `<host>:<ADB_TRANSPORT_PORT>` as a remote device. The adb server of the container is the only one of the device for the other containers, the forwards of Appium are in the container as on Linux. The serial of the device in the container (`DEVICE_UDID` of Appium and STF) is `<host>:<ADB_TRANSPORT_PORT>`; the device also authorizes the key of the container (`/root/.android`) on the first connection.
+
 ## Startup
 
 1. The adb server starts with remote access (`adb -a -P ${ADB_PORT} server nodaemon`).
-2. With `ANDROID_DEVICE` set, the device is connected with `adb connect` (10 attempts).
-3. The entrypoint waits until `adb shell dumpsys display` returns the display info, so the device is fully booted (60 attempts, `ADB_POLLING_SEC` apart), and prints the filesystem usage of the device.
-4. For the Zebrunner Redroid emulator (`ANDROID_DEVICE=device:5555`) the Appium settings APK of the Appium UiAutomator2 driver and `/tmp/zebrunner/chrome/latest.apk` are installed when they exist.
-5. Every 33 seconds the device state (`adb get-state`) is checked.
+2. With `ADB_TRANSPORT_SERVER` set, the USB device of the host server is forwarded and becomes `ANDROID_DEVICE` (see above).
+3. With `ANDROID_DEVICE` set, the device is connected with `adb connect` (10 attempts).
+4. The entrypoint waits until `adb shell dumpsys display` returns the display info, so the device is fully booted (60 attempts, `ADB_POLLING_SEC` apart), and prints the filesystem usage of the device.
+5. For the Zebrunner Redroid emulator (`ANDROID_DEVICE=device:5555`) the Appium settings APK of the Appium UiAutomator2 driver and `/tmp/zebrunner/chrome/latest.apk` are installed when they exist.
+6. Every 33 seconds the device state (`adb get-state`) is checked.
 
 ## Exit codes and health
 
-- Exit code `0` means a problem that a restart does not fix: invalid configuration, an unauthorized device (authorize it manually), a device in a state that needs troubleshooting (`recovery`, `rescue`, `sideload`, no permissions, ...), or a device that stays in a temporary state (`authorizing`, `connecting`, `unknown`, `bootloader`) for 10 checks.
-- Exit code `1` asks for a restart: the adb server is not running (an adb client call would start a new one without remote access, so it is checked during the startup and before every device check), the remote device can't be connected or is lost, the device is not fully booted, or the USB device is lost and its port can't be reset with `usbreset`.
+- Exit code `0` means a problem that a restart does not fix: invalid configuration, an unauthorized device (authorize it manually, also the adb server of the host with `ADB_TRANSPORT_SERVER`), a device in a state that needs troubleshooting (`recovery`, `rescue`, `sideload`, no permissions, ...), or a device that stays in a temporary state (`authorizing`, `connecting`, `unknown`, `bootloader`) for 10 checks.
+- Exit code `1` asks for a restart: the USB device is missing on `ADB_TRANSPORT_SERVER` or its port can't be forwarded, the adb server is not running (an adb client call would start a new one without remote access, so it is checked during the startup and before every device check), the remote device can't be connected or is lost, the device is not fully booted, or the USB device is lost and its port can't be reset with `usbreset`.
 - An `offline` device is reconnected with `adb reconnect`, a lost USB device gets its `DEVICE_BUS` port reset, the checks go on after that.
 - The image healthcheck expects `adb -P ${ADB_PORT} get-state` to return `device`.
 - Set `DEBUG=true` to keep the container alive for `DEBUG_TIMEOUT` seconds after the entrypoint exits, and `LOGGER_LEVEL=DEBUG` or `VERBOSE=true` for more output.
