@@ -69,7 +69,8 @@ check_contains "entrypoint" '"Entrypoint":["/opt/zebrunner/entrypoint.sh"]' "$co
 # the literal text of the image configuration
 # shellcheck disable=SC2016
 check_contains "healthcheck checks the device state on ADB_PORT" 'adb -P \"${ADB_PORT}\" get-state' "$config"
-for env in ANDROID_DEVICE= DEVICE_BUS= ADB_PORT=5037 ADB_POLLING_SEC=5 LOGGER_LEVEL=INFO DEBUG=false DEBUG_TIMEOUT=3600 VERBOSE=false; do
+for env in ANDROID_DEVICE= DEVICE_BUS= ADB_PORT=5037 ADB_POLLING_SEC=5 LOGGER_LEVEL=INFO DEBUG=false DEBUG_TIMEOUT=3600 VERBOSE=false \
+  ADB_TRANSPORT_SERVER= ADB_TRANSPORT_SERIAL= ADB_TRANSPORT_PORT=5555; do
   check_contains "default ${env}" "\"${env}\"" "$config"
 done
 
@@ -102,6 +103,8 @@ section "configuration validation"
 run_image --env ADB_PORT=abc
 check_contains "invalid ADB_PORT is reported" "ADB_PORT must be a non-negative integer, but it is 'abc'." "$OUT"
 check_contains "invalid configuration ends the entrypoint" "Invalid configuration. Exiting!" "$OUT"
+run_image --env ADB_TRANSPORT_SERVER=host.docker.internal
+check_contains "invalid ADB_TRANSPORT_SERVER is reported" "ADB_TRANSPORT_SERVER must be <host>:<port>" "$OUT"
 check "invalid configuration exits with 0" "0" "$STATUS"
 
 finish

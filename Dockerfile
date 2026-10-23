@@ -5,6 +5,10 @@ ENV ANDROID_DEVICE="" \
     DEVICE_BUS="" \
     ADB_PORT=5037 \
     ADB_POLLING_SEC=5 \
+    # The USB device of the adb server of the host (macOS), "host:port"
+    ADB_TRANSPORT_SERVER="" \
+    ADB_TRANSPORT_SERIAL="" \
+    ADB_TRANSPORT_PORT=5555 \
     # Debug mode vars
     DEBUG=false \
     DEBUG_TIMEOUT=3600 \
