@@ -2,7 +2,7 @@
 
 The Zebrunner Device Connector is a lightweight Docker image that exposes an Android device over adb. It starts an adb server with remote access, connects a remote device (Wi-Fi, the Redroid emulator or the USB device of the adb server of a macOS host) when needed, waits until the device is fully booted and monitors the device state. Its adb server is the only one of the device: the Appium and STF containers use it (`connector:5037`).
 
-The image is based on Alpine and runs on `linux/amd64` only (it contains the amd64 builds of `adb` from the Android [platform-tools](https://developer.android.com/tools/releases/platform-tools) 37.0.1 and of `usbreset`).
+The image is based on Alpine and runs on `linux/amd64` only (it contains the amd64 build of `adb` from the Android [platform-tools](https://developer.android.com/tools/releases/platform-tools) 37.0.1). `usbreset` is built from `tools/usbreset/usbreset.c` in the image build.
 
 Everything the image build downloads is pinned: the base image by version and digest, the Alpine packages by version, and the platform-tools archive by its SHA-256. Alpine drops the old revisions of a package from its release repositories, so a failing `apk add` after a security update means the pinned versions in the `Dockerfile` need a bump (the installed ones are checked by `make docker`).
 
@@ -21,7 +21,7 @@ Set these environment variables when starting the container. The entrypoint vali
 | Variable | Default | Description |
 | --- | --- | --- |
 | `ANDROID_DEVICE` | empty | Remote device to connect with `adb connect` in `host:port` form (for example a Wi-Fi device). If empty, the device is expected on USB. `device:5555` is the Zebrunner Redroid emulator, see below. |
-| `DEVICE_BUS` | empty | USB device path (for example `/dev/bus/usb/001/002`) that is reset with `usbreset` when the USB device is lost. |
+| `DEVICE_BUS` | empty | USB device path (for example `/dev/bus/usb/001/002`) that is reset with `usbreset` when the USB device is lost (the `USBDEVFS_RESET` ioctl; `usbreset -h` shows the other strategies: `-u` driver unbind/bind, `-a` the `authorized` toggle). |
 | `ADB_PORT` | `5037` | Port of the adb server; the entrypoint and the healthcheck use the same port. |
 | `ADB_POLLING_SEC` | `5` | Delay in seconds between the connection, boot and device state checks. |
 | `ADB_TRANSPORT_SERVER` | empty | The adb server (`host:port`, e.g. `host.docker.internal:5037`) that has the USB device: Docker of macOS has no USB, see [USB device of a macOS host](#usb-device-of-a-macos-host). |

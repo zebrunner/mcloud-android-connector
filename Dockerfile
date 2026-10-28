@@ -1,3 +1,12 @@
+# usbreset (tools/usbreset): the connector resets the USB device of its Android device with it (DEVICE_BUS)
+FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS usbreset
+
+RUN apk add --no-cache \
+        build-base=0.5-r4 linux-headers=7.0.0-r1
+COPY tools/usbreset/usbreset.c /src/
+RUN mkdir -p /out && \
+    cc -Wall -Wextra -Werror -O2 /src/usbreset.c -o /out/usbreset
+
 FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 # In case of any build errors try to use 'FROM --platform=linux/amd64 ...'
 
@@ -32,7 +41,7 @@ RUN wget -q -O /tmp/platform-tools.zip https://dl.google.com/android/repository/
     rm -rf /tmp/platform-tools /tmp/platform-tools.zip /tmp/platform-tools.sha256 && \
     adb version
 
-COPY bin/ /usr/local/bin/
+COPY --from=usbreset /out/usbreset /usr/local/bin/
 COPY util/ /opt/zebrunner/util/
 COPY entrypoint.sh /opt/zebrunner/
 
