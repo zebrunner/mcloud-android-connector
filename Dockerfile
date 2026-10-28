@@ -1,5 +1,5 @@
 # usbreset (tools/usbreset): the connector resets the USB device of its Android device with it (DEVICE_BUS)
-FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS usbreset
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS usbreset
 
 RUN apk add --no-cache \
         build-base=0.5-r4 linux-headers=7.0.0-r1
@@ -7,7 +7,7 @@ COPY tools/usbreset/usbreset.c /src/
 RUN mkdir -p /out && \
     cc -Wall -Wextra -Werror -O2 /src/usbreset.c -o /out/usbreset
 
-FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 # In case of any build errors try to use 'FROM --platform=linux/amd64 ...'
 
 ENV ANDROID_DEVICE="" \
