@@ -3,19 +3,18 @@
 source "$(dirname "$0")/lib.sh"
 cd "$REPO" || exit 1
 
-# apk_packages: the arguments of the 'apk add' command of the Dockerfile, one per line
+# apk_packages: the arguments of the 'apk add' commands of the Dockerfile (every stage), one per line
 apk_packages() {
-  awk '/apk add --no-cache/ { found = 1 } found { print } found && !/\\$/ { exit }' Dockerfile |
+  awk '/apk add --no-cache/ { found = 1 } found { print } found && !/\\$/ { found = 0 }' Dockerfile |
     sed -e 's/^.*apk add --no-cache//' -e 's/&&.*$//' -e 's/\\$//' | tr -s ' ' '\n' | grep -v '^$'
 }
 
 section "Dockerfile pins"
-from="$(grep '^FROM ' Dockerfile)"
-if [[ "$from" =~ ^FROM\ alpine:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]; then
-  pass "base image is alpine:<version>@sha256:<digest>"
-else
-  fail "base image is alpine:<version>@sha256:<digest>" "unexpected FROM" "$from"
-fi
+# every stage: the image and the build of usbreset
+unpinned_from="$(grep '^FROM ' Dockerfile | grep -vE '^FROM alpine:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}( AS [a-z0-9-]+)?$' || true)"
+check "every stage is alpine:<version>@sha256:<digest>" "" "$unpinned_from"
+check "the image and the build stage of usbreset" "2" "$(grep -c '^FROM ' Dockerfile)"
+check_not_contains "no binary of the repository is copied into the image" "COPY bin/" "$(cat Dockerfile)"
 check_not_contains "no edge repository of Alpine" "alpine/edge" "$(grep -v '^ *#' Dockerfile)"
 check_not_contains "no unpinned latest tag" ":latest" "$(grep -v '^ *#' Dockerfile)"
 

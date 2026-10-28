@@ -1,7 +1,7 @@
 #!/bin/bash
 # Checks of the docker image: build, contents and the entrypoint startup without a device.
 # IMAGE overrides the tag of the tested image (it is built when missing, REBUILD=true builds it anyway),
-# PLATFORM its platform (the image is amd64 only: adb and usbreset are amd64 binaries).
+# PLATFORM its platform (the image is amd64 only: adb is an amd64 binary).
 source "$(dirname "$0")/lib.sh"
 cd "$REPO" || exit 1
 
@@ -52,12 +52,15 @@ for file in /opt/zebrunner/entrypoint.sh /opt/zebrunner/util/logger.sh /opt/zebr
 done
 check_contains "libc++ of adb is next to it" "/usr/local/bin/libc++.so" "$(in_image ls /usr/local/bin/libc++.so)"
 check_contains "usbreset works" "Usage:" "$(in_image usbreset)"
+check_contains "usbreset is the build of tools/usbreset (its strategies)" "[-i|-u|-a]" "$(in_image usbreset --help 2>&1)"
+check "usbreset fails for a missing device" "1" "$(in_image sh -c 'usbreset /dev/bus/usb/001/999 > /dev/null 2>&1; echo $?')"
 check_not_contains "the downloads are removed" "platform-tools" "$(in_image ls /tmp)"
 
 section "pinned versions"
-# the packages of the 'apk add' command are name=version
+# the packages of the 'apk add' command of the image (its last stage, after the build of usbreset) are name=version
 installed="$(in_image apk list --installed)"
-packages="$(awk '/apk add --no-cache/ { found = 1 } found { print } found && !/\\$/ { exit }' Dockerfile |
+packages="$(awk '/^FROM / { stage = "" } { stage = stage $0 "\n" } END { printf "%s", stage }' Dockerfile |
+  awk '/apk add --no-cache/ { found = 1 } found { print } found && !/\\$/ { exit }' |
   grep -oE '[a-z0-9][a-z0-9.+_-]*=[^ \\]+')"
 for package in $packages; do
   check_contains "${package%%=*} ${package#*=} is installed" "${package%%=*}-${package#*=} " "$installed"
