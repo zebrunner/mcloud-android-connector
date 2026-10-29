@@ -2,7 +2,7 @@
 
 The Zebrunner Device Connector is a lightweight Docker image that exposes an Android device over adb. It starts an adb server with remote access, connects a remote device (Wi-Fi, an emulator by its adb address or the USB device of the adb server of a macOS host) when needed, waits until the device is fully booted and monitors the device state. Its adb server is the only one of the device: the Appium and STF containers use it (`connector:5037`).
 
-The image is based on Alpine and runs on `linux/amd64` only (it contains the amd64 build of `adb` from the Android [platform-tools](https://developer.android.com/tools/releases/platform-tools) 37.0.1). `usbreset` is built from `tools/usbreset/usbreset.c` in the image build.
+The image is based on Alpine and is built for `linux/amd64` and `linux/arm64`: on amd64 it contains `adb` of the Android [platform-tools](https://developer.android.com/tools/releases/platform-tools) 37.0.1, on arm64, for which Google publishes no platform-tools, `adb` of the Alpine package `android-tools-adb` 35.0.2; both speak the adb protocol 1.0.41 of the adb servers of the hosts (a USB device of a macOS host). `usbreset` is built from `tools/usbreset/usbreset.c` in the image build.
 
 Everything the image build downloads is pinned: the base image by version and digest, the Alpine packages by version, and the platform-tools archive by its SHA-256. Alpine drops the old revisions of a package from its release repositories, so a failing `apk add` after a security update means the pinned versions in the `Dockerfile` need a bump (the installed ones are checked by `make docker`).
 
@@ -13,7 +13,7 @@ make build VERSION=3.1   # public.ecr.aws/zebrunner/mcloud-android-connector:3.1
 make push VERSION=3.1    # built by docker buildx and pushed: docker login public.ecr.aws first
 ```
 
-The image is `linux/amd64` only: `make build` builds it for `linux/amd64` on any machine (emulated on Apple Silicon), `make push` too. `IMAGE_REPO` sets another repository (e.g. `IMAGE_REPO=registry.example.com/mcloud-android-connector`), `VERSION` is the tag and the
+`make build` builds the image for the platform of this machine, `make push` builds `linux/amd64` and `linux/arm64` (`PLATFORMS`) with `docker buildx` and pushes them as one multi-platform image. `IMAGE_REPO` sets another repository (e.g. `IMAGE_REPO=registry.example.com/mcloud-android-connector`), `VERSION` is the tag and the
 `org.opencontainers.image.version` label (`dev` by default, required by `push`). `make push` uses the buildx builder
 `mcloud` (docker-container driver), which it creates once; another platform than the one of the machine needs QEMU
 (`docker run --privileged --rm tonistiigi/binfmt --install all`).
@@ -66,7 +66,7 @@ Docker of macOS has no USB, so a USB device stays on the adb server of the host 
 | --- | --- |
 | `make lint` | `tests/lint.sh`: yamllint, actionlint, hadolint, pymarkdown, `bash -n`, ShellCheck and shfmt (style of `.editorconfig`), every env var of the `Dockerfile` documented in this README, the text file checks of CONVENTIONS.md. The tools are installed into `.venv` from `tests/requirements-lint.txt`; hadolint comes from `brew install hadolint` on macOS. |
 | `make test` | The static checks of the repository (`tests/repo_test.sh`: the pins of the `Dockerfile`, the Dependabot configuration) and the tests of `util/logger.sh`, `util/debug.sh` and `entrypoint.sh`: configuration validation, the adb server port and its liveness, USB and remote devices, the boot wait, every device state of the holder with its retry limits, the `DEBUG` and `VERBOSE` modes. The tools are stubs (`adb`, `usbreset`, `sleep`), so no docker and no Android device are needed, but bash 4+ is (on macOS `brew install bash`). |
-| `make docker` | `tests/image_test.sh`: builds the image (`linux/amd64`, `IMAGE` overrides its tag, `REBUILD=true` rebuilds it), checks its contents, the installed versions of the pinned packages, configuration, configuration validation and the entrypoint startup without a device, also with a stopped adb server. |
+| `make docker` | `tests/image_test.sh`: builds the image (`PLATFORM`: `linux/amd64` by default or `linux/arm64`, `IMAGE` overrides its tag, `REBUILD=true` rebuilds it), checks its contents, the installed versions of the pinned packages, configuration, configuration validation and the entrypoint startup without a device, also with a stopped adb server. |
 
 Every test script prints its checks and writes JUnit XML into `JUNIT_DIR` when it is set.
 
