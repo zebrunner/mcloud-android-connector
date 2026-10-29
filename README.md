@@ -1,6 +1,6 @@
 # Zebrunner Device Connector
 
-The Zebrunner Device Connector is a lightweight Docker image that exposes an Android device over adb. It starts an adb server with remote access, connects a remote device (Wi-Fi, the Redroid emulator or the USB device of the adb server of a macOS host) when needed, waits until the device is fully booted and monitors the device state. Its adb server is the only one of the device: the Appium and STF containers use it (`connector:5037`).
+The Zebrunner Device Connector is a lightweight Docker image that exposes an Android device over adb. It starts an adb server with remote access, connects a remote device (Wi-Fi, an emulator by its adb address or the USB device of the adb server of a macOS host) when needed, waits until the device is fully booted and monitors the device state. Its adb server is the only one of the device: the Appium and STF containers use it (`connector:5037`).
 
 The image is based on Alpine and runs on `linux/amd64` only (it contains the amd64 build of `adb` from the Android [platform-tools](https://developer.android.com/tools/releases/platform-tools) 37.0.1). `usbreset` is built from `tools/usbreset/usbreset.c` in the image build.
 
@@ -20,7 +20,7 @@ Set these environment variables when starting the container. The entrypoint vali
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `ANDROID_DEVICE` | empty | Remote device to connect with `adb connect` in `host:port` form (for example a Wi-Fi device). If empty, the device is expected on USB. `device:5555` is the Zebrunner Redroid emulator, see below. |
+| `ANDROID_DEVICE` | empty | Remote device to connect with `adb connect` in `host:port` form (for example a Wi-Fi device or an emulator). If empty, the device is expected on USB. |
 | `DEVICE_BUS` | empty | USB device path (for example `/dev/bus/usb/001/002`) that is reset with `usbreset` when the USB device is lost (the `USBDEVFS_RESET` ioctl; `usbreset -h` shows the other strategies: `-u` driver unbind/bind, `-a` the `authorized` toggle). |
 | `ADB_PORT` | `5037` | Port of the adb server; the entrypoint and the healthcheck use the same port. |
 | `ADB_POLLING_SEC` | `5` | Delay in seconds between the connection, boot and device state checks. |
@@ -44,8 +44,7 @@ Docker of macOS has no USB, so a USB device stays on the adb server of the host 
 2. With `ADB_TRANSPORT_SERVER` set, the USB device of the host server is forwarded and becomes `ANDROID_DEVICE` (see above).
 3. With `ANDROID_DEVICE` set, the device is connected with `adb connect` (10 attempts).
 4. The entrypoint waits until `adb shell dumpsys display` returns the display info, so the device is fully booted (60 attempts, `ADB_POLLING_SEC` apart), and prints the filesystem usage of the device.
-5. For the Zebrunner Redroid emulator (`ANDROID_DEVICE=device:5555`) the Appium settings APK of the Appium UiAutomator2 driver and `/tmp/zebrunner/chrome/latest.apk` are installed when they exist.
-6. Every 33 seconds the device state (`adb get-state`) is checked.
+5. Every 33 seconds the device state (`adb get-state`) is checked.
 
 ## Exit codes and health
 
@@ -62,7 +61,7 @@ Docker of macOS has no USB, so a USB device stays on the adb server of the host 
 | Target | What it checks |
 | --- | --- |
 | `make lint` | `tests/lint.sh`: yamllint, actionlint, hadolint, pymarkdown, `bash -n`, ShellCheck and shfmt (style of `.editorconfig`), every env var of the `Dockerfile` documented in this README, the text file checks of CONVENTIONS.md. The tools are installed into `.venv` from `tests/requirements-lint.txt`; hadolint comes from `brew install hadolint` on macOS. |
-| `make test` | The static checks of the repository (`tests/repo_test.sh`: the pins of the `Dockerfile`, the Dependabot configuration) and the tests of `util/logger.sh`, `util/debug.sh` and `entrypoint.sh`: configuration validation, the adb server port and its liveness, USB and remote devices, the boot wait, the Redroid emulator extras, every device state of the holder with its retry limits, the `DEBUG` and `VERBOSE` modes. The tools are stubs (`adb`, `usbreset`, `sleep`), so no docker and no Android device are needed, but bash 4+ is (on macOS `brew install bash`). |
+| `make test` | The static checks of the repository (`tests/repo_test.sh`: the pins of the `Dockerfile`, the Dependabot configuration) and the tests of `util/logger.sh`, `util/debug.sh` and `entrypoint.sh`: configuration validation, the adb server port and its liveness, USB and remote devices, the boot wait, every device state of the holder with its retry limits, the `DEBUG` and `VERBOSE` modes. The tools are stubs (`adb`, `usbreset`, `sleep`), so no docker and no Android device are needed, but bash 4+ is (on macOS `brew install bash`). |
 | `make docker` | `tests/image_test.sh`: builds the image (`linux/amd64`, `IMAGE` overrides its tag, `REBUILD=true` rebuilds it), checks its contents, the installed versions of the pinned packages, configuration, configuration validation and the entrypoint startup without a device, also with a stopped adb server. |
 
 Every test script prints its checks and writes JUnit XML into `JUNIT_DIR` when it is set.

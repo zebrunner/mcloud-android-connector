@@ -7,10 +7,7 @@ cd "$REPO" || exit 1
 
 (("$(bash -c 'echo "${BASH_VERSINFO[0]}"')" >= 4)) || skip "requires bash 4 in PATH"
 
-sed -e "s#/opt/zebrunner/#${REPO}/#g" -e "s#/tmp/zebrunner/#${WORK}/zebrunner/#g" \
-  -e "s#/usr/lib/node_modules/#${WORK}/node_modules/#g" entrypoint.sh > "${WORK}/entrypoint.sh"
-SETTINGS_APK="${WORK}/node_modules/appium/node_modules/appium-uiautomator2-driver/node_modules/io.appium.settings/apks/settings_apk-debug.apk"
-CHROME_APK="${WORK}/zebrunner/chrome/latest.apk"
+sed -e "s#/opt/zebrunner/#${REPO}/#g" entrypoint.sh > "${WORK}/entrypoint.sh"
 
 # the stubs read their behavior from the FAKE_* variables of the scenario
 export FAKE_WORK="$WORK"
@@ -266,9 +263,9 @@ for state in offline unauthorized authorizing; do
   ANDROID_DEVICE=device:5555
   FAKE_DEVICE_STATE=$state
   run_entrypoint
-  check "${state} Redroid emulator is not connected" "10" "$(cat "${WORK}/connect.n")"
-  check_not_contains "${state} Redroid emulator is not reported as connected" "Connected: device:5555" "$OUT"
-  check "${state} Redroid emulator exits with 1" "1" "$STATUS"
+  check "${state} device:5555 is not connected" "10" "$(cat "${WORK}/connect.n")"
+  check_not_contains "${state} device:5555 is not reported as connected" "Connected: device:5555" "$OUT"
+  check "${state} device:5555 exits with 1" "1" "$STATUS"
 done
 
 scenario
@@ -367,28 +364,6 @@ check "boot is checked 60 times" "60" "$(cat "${WORK}/boot.n")"
 check_contains "not booted device is reported" "Potentially device is not fully booted yet!" "$OUT"
 check "not booted device exits with 1" "1" "$STATUS"
 check_not_contains "not booted device is not monitored" "get-state" "$(calls adb)"
-
-section "Redroid emulator"
-scenario
-ANDROID_DEVICE=device:5555
-mkdir -p "$(dirname "$SETTINGS_APK")" "$(dirname "$CHROME_APK")"
-touch "$SETTINGS_APK" "$CHROME_APK"
-run_entrypoint
-check_contains "appium settings are installed" "install ${SETTINGS_APK}" "$(calls adb)"
-check_contains "chrome is installed" "install ${CHROME_APK}" "$(calls adb)"
-
-scenario
-ANDROID_DEVICE=device:5555
-run_entrypoint
-check_not_contains "missing apks are not installed" "install" "$(calls adb)"
-check_contains "emulator without apks goes on" "Device is fully available." "$OUT"
-
-scenario
-ANDROID_DEVICE=192.168.0.10:5555
-mkdir -p "$(dirname "$SETTINGS_APK")" "$(dirname "$CHROME_APK")"
-touch "$SETTINGS_APK" "$CHROME_APK"
-run_entrypoint
-check_not_contains "apks are installed on the emulator only" "install" "$(calls adb)"
 
 section "holder"
 scenario

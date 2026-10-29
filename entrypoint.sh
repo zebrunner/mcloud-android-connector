@@ -103,7 +103,7 @@ if [[ -n "$ADB_TRANSPORT_SERVER" ]]; then
 fi
 
 #### ADB connect
-# Via wireless network, via tcp for redroid emulator or via the adb server of the host
+# Via wireless network, an emulator by its adb address or via the adb server of the host
 if [[ -n "$ANDROID_DEVICE" ]]; then
   isConnected=0
   declare -i index=0
@@ -111,7 +111,7 @@ if [[ -n "$ANDROID_DEVICE" ]]; then
     exitIfAdbServerStopped
     logger "Connecting to: ${ANDROID_DEVICE}"
     adb connect "${ANDROID_DEVICE}"
-    # the serial must be exactly ANDROID_DEVICE in the 'device' state: 'device:5555' of Redroid contains 'device' itself
+    # the serial must be exactly ANDROID_DEVICE in the 'device' state: a serial like 'device:5555' contains 'device' itself
     if adb devices | awk -v serial="${ANDROID_DEVICE}" '$1 == serial && $2 == "device" { print; found = 1 } END { exit !found }'; then
       isConnected=1
       logger "Connected: ${ANDROID_DEVICE}"
@@ -150,26 +150,6 @@ fi
 
 #### Print device filesystem usage statistics
 adb shell df -h
-
-#### Extra steps for Zebrunner Redroid Emulator
-if [[ "$ANDROID_DEVICE" == "device:5555" ]]; then
-  # Moved sleep after reconnection to root where the problem occurs much more often
-  #sleep 5
-  #adb devices
-
-  # install appium apk
-  if [[ -f /usr/lib/node_modules/appium/node_modules/appium-uiautomator2-driver/node_modules/io.appium.settings/apks/settings_apk-debug.apk ]]; then
-    adb install /usr/lib/node_modules/appium/node_modules/appium-uiautomator2-driver/node_modules/io.appium.settings/apks/settings_apk-debug.apk
-  fi
-
-  # download and install chrome apk from https://www.apkmirror.com/apk/google-inc/chrome/chrome-99-0-4844-73-release/
-  # version: x86 + x86_64
-  # url: https://www.apkmirror.com/apk/google-inc/chrome/chrome-99-0-4844-73-release/google-chrome-fast-secure-99-0-4844-73-10-android-apk-download/
-  # /tmp/zebrunner/chrome/latest.apk is default shared location for chrome browser apk
-  if [[ -f /tmp/zebrunner/chrome/latest.apk ]]; then
-    adb install /tmp/zebrunner/chrome/latest.apk
-  fi
-fi
 
 logger "Device is fully available."
 
