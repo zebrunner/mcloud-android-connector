@@ -11,9 +11,13 @@ apk_packages() {
 
 section "Dockerfile pins"
 # every stage: the image and the build of usbreset
-unpinned_from="$(grep '^FROM ' Dockerfile | grep -vE '^FROM alpine:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}( AS [a-z0-9-]+)?$' || true)"
+# the literal FROM of the stage of the platform
+# shellcheck disable=SC2016
+unpinned_from="$(grep '^FROM ' Dockerfile | grep -v '^FROM base-${TARGETARCH}$' |
+  grep -vE '^FROM alpine:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}( AS [a-z0-9-]+)?$' || true)"
 check "every stage is alpine:<version>@sha256:<digest>" "" "$unpinned_from"
-check "the image and the build stage of usbreset" "2" "$(grep -c '^FROM ' Dockerfile)"
+check "the stages: usbreset, the adb of amd64, the adb of arm64 and its image, the image of the platform" \
+  "usbreset base-amd64 adb-arm64 base-arm64 base-\${TARGETARCH}" "$(sed -n -E 's/^FROM (.* AS )?([^ ]+)$/\2/p' Dockerfile | paste -s -d ' ' -)"
 check_not_contains "no binary of the repository is copied into the image" "COPY bin/" "$(cat Dockerfile)"
 check_not_contains "no edge repository of Alpine" "alpine/edge" "$(grep -v '^ *#' Dockerfile)"
 check_not_contains "no unpinned latest tag" ":latest" "$(grep -v '^ *#' Dockerfile)"
