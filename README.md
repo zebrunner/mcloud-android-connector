@@ -52,9 +52,11 @@ Docker of macOS has no USB, so a USB device stays on the adb server of the host 
 4. The entrypoint waits until `adb shell dumpsys display` returns the display info, so the device is fully booted (60 attempts, `ADB_POLLING_SEC` apart), and prints the filesystem usage of the device.
 5. Every 33 seconds the device state (`adb get-state`) is checked.
 
+`docker stop` ends the entrypoint (PID 1 of the container) at once, also in a wait: it stops the adb server and exits with `0`.
+
 ## Exit codes and health
 
-- Exit code `0` means a problem that a restart does not fix: invalid configuration, an unauthorized device (authorize it manually, also the adb server of the host with `ADB_TRANSPORT_SERVER`), a device in a state that needs troubleshooting (`recovery`, `rescue`, `sideload`, no permissions, ...), or a device that stays in a temporary state (`authorizing`, `connecting`, `unknown`, `bootloader`) for 10 checks.
+- Exit code `0` means a problem that a restart does not fix or a stop: `docker stop` (`SIGTERM`), invalid configuration, an unauthorized device (authorize it manually, also the adb server of the host with `ADB_TRANSPORT_SERVER`), a device in a state that needs troubleshooting (`recovery`, `rescue`, `sideload`, no permissions, ...), or a device that stays in a temporary state (`authorizing`, `connecting`, `unknown`, `bootloader`) for 10 checks.
 - Exit code `1` asks for a restart: the USB device is missing on `ADB_TRANSPORT_SERVER` or its port can't be forwarded, the adb server is not running (an adb client call would start a new one without remote access, so it is checked during the startup and before every device check), the remote device can't be connected or is lost, the device is not fully booted, or the USB device is lost and its port can't be reset with `usbreset`.
 - An `offline` device is reconnected with `adb reconnect`, a lost USB device gets its `DEVICE_BUS` port reset, the checks go on after that.
 - The image healthcheck expects `adb -P ${ADB_PORT} get-state` to return `device`.
@@ -67,8 +69,8 @@ Docker of macOS has no USB, so a USB device stays on the adb server of the host 
 | Target | What it checks |
 | --- | --- |
 | `make lint` | `tests/lint.sh`: yamllint, actionlint, hadolint, pymarkdown, `bash -n`, ShellCheck and shfmt (style of `.editorconfig`), every env var of the `Dockerfile` documented in this README, the text file checks of CONVENTIONS.md. The tools are installed into `.venv` from `tests/requirements-lint.txt`; hadolint comes from `brew install hadolint` on macOS. |
-| `make test` | The static checks of the repository (`tests/repo_test.sh`: the pins of the `Dockerfile`, the Dependabot configuration) and the tests of `util/logger.sh`, `util/debug.sh` and `entrypoint.sh`: configuration validation, the adb server port and its liveness, USB and remote devices, the boot wait, every device state of the holder with its retry limits, the `DEBUG` and `VERBOSE` modes. The tools are stubs (`adb`, `usbreset`, `sleep`), so no docker and no Android device are needed, but bash 4+ is (on macOS `brew install bash`). |
-| `make docker` | `tests/image_test.sh`: builds the image (`PLATFORM`: `linux/amd64` by default or `linux/arm64`, `IMAGE` overrides its tag, `REBUILD=true` rebuilds it), checks its contents, the installed versions of the pinned packages, configuration, configuration validation and the entrypoint startup without a device, also with a stopped adb server. |
+| `make test` | The static checks of the repository (`tests/repo_test.sh`: the pins of the `Dockerfile`, the Dependabot configuration) and the tests of `util/logger.sh`, `util/debug.sh` and `entrypoint.sh`: configuration validation, the adb server port and its liveness, USB and remote devices, the boot wait, every device state of the holder with its retry limits, `SIGTERM`, the `DEBUG` and `VERBOSE` modes. The tools are stubs (`adb`, `usbreset`, `sleep`), so no docker and no Android device are needed, but bash 4+ is (on macOS `brew install bash`). |
+| `make docker` | `tests/image_test.sh`: builds the image (`PLATFORM`: `linux/amd64` by default or `linux/arm64`, `IMAGE` overrides its tag, `REBUILD=true` rebuilds it), checks its contents, the installed versions of the pinned packages, configuration, configuration validation and the entrypoint startup without a device, also with a stopped adb server, and `docker stop`. |
 
 Every test script prints its checks and writes JUnit XML into `JUNIT_DIR` when it is set.
 
