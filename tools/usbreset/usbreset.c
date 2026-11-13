@@ -1,11 +1,12 @@
 // usbreset: resets a USB device; the connector resets the USB device of its Android device when adb loses it
-// (entrypoint.sh, DEVICE_BUS). Built in the image (Dockerfile): cc -Wall -Wextra -O2 usbreset.c -o usbreset
+// (entrypoint.sh, DEVICE_BUS). Built in the image (Dockerfile): cc -Wall -Wextra -Werror -O2 usbreset.c -o usbreset
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <time.h>
 #include <sys/ioctl.h>
 #include <linux/usbdevice_fs.h>
 
@@ -15,7 +16,8 @@ enum reset_mode {
     MODE_AUTHORIZED  /* sysfs authorized 0/1 toggle, target = bus-id */
 };
 
-static unsigned int wait_ms = 200; /* delay between the two halves of -u/-a */
+static unsigned long wait_ms = 200; /* delay between the two halves of -u/-a */
+#define MAX_WAIT_MS 60000UL
 
 static void usage(const char *prog)
 {
@@ -36,7 +38,7 @@ static void usage(const char *prog)
         "       unplug/replug without cutting power.\n"
         "       target = bus-id, same as -u\n"
         "\n"
-        "  -w ms   delay between the two halves of -u/-a (default: %u)\n"
+        "  -w ms   delay between the two halves of -u/-a (default: %lu, at most %lu)\n"
         "\n"
         "-i requires write access to the device node. -u/-a require root\n"
         "(or a udev rule granting write access to the relevant sysfs files).\n"
@@ -55,7 +57,7 @@ static void usage(const char *prog)
         "    -> take the last path component, e.g. .../usb1/1-3/1-3.4 -> 1-3.4\n"
         "    or: ls /sys/bus/usb/devices/ | grep -v ':'  (lists all device-level ids;\n"
         "        entries with a colon, e.g. 1-3.4:1.0, are interfaces, not targets)\n",
-        prog, prog, wait_ms);
+        prog, prog, wait_ms, MAX_WAIT_MS);
 }
 
 static int write_sysfs(const char *path, const char *value)
@@ -70,13 +72,43 @@ static int write_sysfs(const char *path, const char *value)
     }
 
     rc = write(fd, value, len);
-    if (rc < 0 || (size_t)rc != len) {
+    if (rc < 0) {
         fprintf(stderr, "%s: write: %s\n", path, strerror(errno));
+        close(fd);
+        return -1;
+    }
+    if ((size_t)rc != len) {
+        fprintf(stderr, "%s: write: short write (%d of %zu bytes)\n", path, rc, len);
         close(fd);
         return -1;
     }
 
     close(fd);
+    return 0;
+}
+
+/* sleeps wait_ms milliseconds, the rest again after a signal */
+static void wait_between(void)
+{
+    struct timespec ts = { (time_t)(wait_ms / 1000), (long)(wait_ms % 1000) * 1000000L };
+
+    while (nanosleep(&ts, &ts) < 0 && errno == EINTR)
+        ;
+}
+
+/* parses the milliseconds of -w: a decimal number up to MAX_WAIT_MS, -1 for anything else */
+static int parse_wait_ms(const char *arg, unsigned long *ms)
+{
+    char *end;
+    unsigned long value;
+
+    if (*arg < '0' || *arg > '9')
+        return -1;
+    errno = 0;
+    value = strtoul(arg, &end, 10);
+    if (errno != 0 || *end != '\0' || value > MAX_WAIT_MS)
+        return -1;
+    *ms = value;
     return 0;
 }
 
@@ -109,7 +141,7 @@ static int reset_unbind(const char *busid)
     if (write_sysfs("/sys/bus/usb/drivers/usb/unbind", busid))
         return 1;
 
-    usleep(wait_ms * 1000);
+    wait_between();
 
     printf("Rebinding %s\n", busid);
     if (write_sysfs("/sys/bus/usb/drivers/usb/bind", busid))
@@ -132,7 +164,7 @@ static int reset_authorized(const char *busid)
     if (write_sysfs(path, "0"))
         return 1;
 
-    usleep(wait_ms * 1000);
+    wait_between();
 
     printf("Reauthorizing %s\n", busid);
     if (write_sysfs(path, "1"))
@@ -183,7 +215,11 @@ int main(int argc, char **argv)
             mode_set = 1;
             break;
         case 'w':
-            wait_ms = (unsigned int)strtoul(optarg, NULL, 10);
+            if (parse_wait_ms(optarg, &wait_ms)) {
+                fprintf(stderr, "%s: -w: '%s' is not a number of milliseconds from 0 to %lu\n",
+                    argv[0], optarg, MAX_WAIT_MS);
+                return 1;
+            }
             break;
         case 'h':
             usage(argv[0]);
