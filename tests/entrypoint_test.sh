@@ -400,6 +400,18 @@ check "offline device is reconnected" "reconnect" "$(calls adb | grep '^reconnec
 check "reconnected device is monitored" "2" "$(count 'Device connected successfully.' "$OUT")"
 
 scenario
+FAKE_STATES="device;offline"
+run_entrypoint
+check "offline device is reconnected on every check" "10" "$(calls adb | grep -c '^reconnect')"
+check_contains "device staying offline is reported" "Device is still offline or lost after the reconnects, restarting container." "$OUT"
+check "device staying offline exits with 1" "1" "$STATUS"
+
+scenario
+FAKE_STATES="device;error: no devices/emulators found"
+run_entrypoint
+check "USB device staying lost after the resets exits with 1" "1" "$STATUS"
+
+scenario
 ANDROID_DEVICE=192.168.0.10:5555
 FAKE_STATES="device;error: no devices/emulators found"
 run_entrypoint

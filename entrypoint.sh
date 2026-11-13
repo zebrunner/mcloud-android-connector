@@ -156,6 +156,8 @@ logger "Device is fully available."
 #### Entrypoint holder
 while :; do
   isAvailable=0
+  # the device was offline or lost at the last check: a restart connects it again
+  isLost=0
   declare -i index=0
   # as default ADB_POLLING_SEC is 5s then we wait for authorizing ~50 sec only
   while [[ $index -lt 10 ]]; do
@@ -166,6 +168,7 @@ while :; do
     state=$(adb get-state 2>&1)
     logger --------------
     logger state: "$state"
+    isLost=0
 
     case $state in
     "device")
@@ -184,6 +187,7 @@ while :; do
     *"offline"*)
       logger "WARN" "Device is offline, performing adb reconnect."
       adb reconnect
+      isLost=1
       ;;
     *"no devices/emulators found"*)
       if [[ -n "$ANDROID_DEVICE" ]]; then
@@ -192,6 +196,7 @@ while :; do
       else
         logger "WARN" "Device not found, performing usb port reset or restarting container, if can't reset usb."
         usbreset "${DEVICE_BUS}" || exit 1
+        isLost=1
       fi
       ;;
     *)
@@ -207,6 +212,10 @@ while :; do
   done
 
   if [[ $isAvailable -eq 0 ]]; then
+    if [[ $isLost -eq 1 ]]; then
+      logger "ERROR" "Device is still offline or lost after the reconnects, restarting container."
+      exit 1
+    fi
     logger "ERROR" "Retry limit reached. Exiting."
     exit 0
   fi
