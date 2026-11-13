@@ -7,6 +7,30 @@
 
 logger "INFO" "\n\n\n\t\tMCLOUD-ANDROID-CONNECTOR\n\n"
 
+#### Stop
+# docker stop sends SIGTERM to the entrypoint, PID 1 of the container: without a handler PID 1 ignores it and docker
+# kills the container after its stop timeout. The entrypoint stops its background processes (the adb server) and exits
+# with 0: the container is stopped on purpose
+
+# stopEntrypoint: the handler of SIGTERM and SIGINT
+# it is called by the trap
+# shellcheck disable=SC2329
+stopEntrypoint() {
+  logger "WARN" "Stopped. Exiting!"
+  # the PIDs of the background processes, one per word
+  # shellcheck disable=SC2046
+  kill $(jobs -p) 2> /dev/null
+  exit 0
+}
+trap stopEntrypoint TERM INT
+
+# pause <seconds>: sleeps in the background: bash runs the handler of a signal after the foreground command only, so
+# a wait for a background process lets a stop end the pause at once
+pause() {
+  sleep "$1" &
+  wait $!
+}
+
 # the port of the host forwarded to adbd of the USB device of ADB_TRANSPORT_SERVER, 5555 like adbd itself by default
 ADB_TRANSPORT_PORT="${ADB_TRANSPORT_PORT:-5555}"
 
@@ -80,7 +104,7 @@ if [[ -n "$ADB_TRANSPORT_SERVER" ]]; then
         exit 0
         ;;
       esac
-      sleep "${ADB_POLLING_SEC}"
+      pause "${ADB_POLLING_SEC}"
       index+=1
     done
     logger "ERROR" "Device '${ADB_TRANSPORT_SERIAL}' is not found on the adb server ${ADB_TRANSPORT_SERVER}. Restarting!"
@@ -91,7 +115,7 @@ if [[ -n "$ADB_TRANSPORT_SERVER" ]]; then
   if [[ "$(transportAdb shell getprop service.adb.tcp.port 2> /dev/null | tr -d '\r')" != "5555" ]]; then
     logger "Switching adbd of the device to tcp:5555."
     transportAdb tcpip 5555
-    sleep "${ADB_POLLING_SEC}"
+    pause "${ADB_POLLING_SEC}"
     waitTransportDevice
   fi
   if ! transportAdb forward "tcp:${ADB_TRANSPORT_PORT}" tcp:5555; then
@@ -118,7 +142,7 @@ if [[ -n "$ANDROID_DEVICE" ]]; then
       break
     fi
 
-    sleep "${ADB_POLLING_SEC}"
+    pause "${ADB_POLLING_SEC}"
     index+=1
   done
 
@@ -137,7 +161,7 @@ while [[ "$info" == "" && $index -lt 60 ]]; do
   exitIfAdbServerStopped
   info=$(adb shell dumpsys display | grep -A 20 DisplayDeviceInfo)
   logger "sleeping ${ADB_POLLING_SEC} seconds..."
-  sleep "${ADB_POLLING_SEC}"
+  pause "${ADB_POLLING_SEC}"
   index+=1
 done
 
@@ -202,7 +226,7 @@ while :; do
     esac
 
     logger "One more attempt in ${ADB_POLLING_SEC} seconds..."
-    sleep "${ADB_POLLING_SEC}"
+    pause "${ADB_POLLING_SEC}"
     index+=1
   done
 
@@ -211,5 +235,5 @@ while :; do
     exit 0
   fi
 
-  sleep 33
+  pause 33
 done

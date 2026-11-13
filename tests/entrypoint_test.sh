@@ -17,7 +17,7 @@ export FAKE_WORK="$WORK"
 stub usbreset 'echo "usbreset|$*" >> "$FAKE_WORK/calls.log"
 [[ "$FAKE_USBRESET" != fail ]]'
 # sleep: the entrypoint holder sleeps 33 seconds between the device checks, after 20 of them the entrypoint is stopped
-# as a scenario has to end with a state that ends the entrypoint
+# as a scenario has to end with a state that ends the entrypoint; FAKE_STOP_SLEEP=1: that sleep goes on after the stop
 # FAKE_SERVER=dies: the pause after the adb server start lets it exit, FAKE_SERVER=crash: the server stops before
 # the second holder check, FAKE_SERVER=crash-on-boot: before the second boot check
 # the stub body is expanded when the stub runs
@@ -27,7 +27,10 @@ stub sleep 'if [[ "$1" == 1 && "$FAKE_SERVER" == dies ]]; then
 elif [[ "$1" == 33 ]]; then
   n=$(cat "$FAKE_WORK/sleep33.n" 2> /dev/null || echo 0)
   echo $((n + 1)) > "$FAKE_WORK/sleep33.n"
-  [[ "$n" -ge 20 ]] && kill -TERM "$PPID"
+  if [[ "$n" -ge 20 ]]; then
+    kill -TERM "$PPID"
+    [[ "$FAKE_STOP_SLEEP" == 1 ]] && exec /bin/sleep 30
+  fi
   if [[ "$FAKE_SERVER" == crash ]]; then
     touch "$FAKE_WORK/server.stop"
     /bin/sleep 0.5
@@ -62,6 +65,7 @@ if [[ "$1" == -H ]]; then
 fi
 if [[ "$*" == *" server "* ]]; then
   [[ "$FAKE_SERVER" == dies ]] && exit 1
+  trap "echo \"adb|server-stopped\" >> \"$FAKE_WORK/calls.log\"; exit 0" TERM
   exec > /dev/null 2>&1
   while kill -0 "$PPID" 2> /dev/null && [[ ! -e "$FAKE_WORK/server.stop" ]]; do /bin/sleep 0.1; done
   exit 0
@@ -125,7 +129,8 @@ scenario() {
   FAKE_TRANSPORT_STATES=device
   FAKE_TCP_PORT=''
   FAKE_FORWARD=ok
-  export FAKE_TRANSPORT_STATES FAKE_TCP_PORT FAKE_FORWARD
+  FAKE_STOP_SLEEP=0
+  export FAKE_STOP_SLEEP FAKE_TRANSPORT_STATES FAKE_TCP_PORT FAKE_FORWARD
   export FAKE_SERVER FAKE_CONNECT FAKE_CONNECT_FAILS FAKE_DEVICE_STATE FAKE_OTHER_DEVICE FAKE_BOOT FAKE_BOOT_FAILS FAKE_STATES FAKE_USBRESET
   export ANDROID_DEVICE='' DEVICE_BUS=/dev/bus/usb/001/002 ADB_PORT=5037 ADB_POLLING_SEC=0 LOGGER_LEVEL=DEBUG
   unset DEBUG VERBOSE ANDROID_ADB_SERVER_PORT ADB_TRANSPORT_SERVER ADB_TRANSPORT_SERIAL ADB_TRANSPORT_PORT
@@ -427,5 +432,17 @@ for state in recovery rescue sideload host "error: insufficient permissions for 
   check_contains "'${state}' asks for troubleshooting" "Troubleshoot device manually to define the best strategy." "$OUT"
   check "'${state}' exits with 0" "0" "$STATUS"
 done
+
+section "stop"
+scenario
+FAKE_STATES=device
+FAKE_STOP_SLEEP=1
+started="$SECONDS"
+run_entrypoint
+check "SIGTERM ends the entrypoint with 0" "0" "$STATUS"
+check "SIGTERM ends the pause of the holder at once" "true" "$([[ $((SECONDS - started)) -lt 10 ]] && echo true || echo false)"
+check_contains "the stop is logged" "Stopped. Exiting!" "$OUT"
+/bin/sleep 0.3
+check "the adb server is stopped" "server-stopped" "$(calls adb | grep -x server-stopped)"
 
 finish
