@@ -1,6 +1,8 @@
-# Zebrunner Device Connector
+# Zebrunner MCloud Android Connector
 
-The Zebrunner Device Connector is a lightweight Docker image that exposes an Android device over adb. It starts an adb server with remote access, connects a remote device (Wi-Fi, an emulator by its adb address or the USB device of the adb server of a macOS host) when needed, waits until the device is fully booted and monitors the device state. Its adb server is the only one of the device: the Appium and STF containers use it (`connector:5037`).
+The Zebrunner MCloud Android Connector is a lightweight Docker image that exposes an Android device over adb. It starts an adb server with remote access, connects a remote device (Wi-Fi, an emulator by its adb address or the USB device of the adb server of a macOS host) when needed, waits until the device is fully booted and monitors the device state. Its adb server is the only one of the device: the Appium and STF containers use it (`connector:5037`).
+
+## Image contents
 
 The image is based on Alpine and is built for `linux/amd64` and `linux/arm64`: on amd64 it contains `adb` of the Android [platform-tools](https://developer.android.com/tools/releases/platform-tools) 37.0.1, on arm64, for which Google publishes no platform-tools, `adb` of the Alpine package `android-tools-adb` 35.0.2; both speak the adb protocol 1.0.41 of the adb servers of the hosts (a USB device of a macOS host). `usbreset` is built from `tools/usbreset/usbreset.c` in the image build.
 
@@ -9,8 +11,8 @@ Everything the image build downloads is pinned: the base image by version and di
 ## Build
 
 ```bash
-make build VERSION=3.1   # public.ecr.aws/zebrunner/mcloud-android-connector:3.1 in the local docker
-make push VERSION=3.1    # built by docker buildx and pushed: docker login public.ecr.aws first
+make build VERSION=2.0   # public.ecr.aws/zebrunner/mcloud-android-connector:2.0 in the local docker
+make push VERSION=2.0    # built by docker buildx and pushed: docker login public.ecr.aws first
 ```
 
 `make build` builds the image for the platform of this machine, `make push` builds `linux/amd64` and `linux/arm64` (`PLATFORMS`) with `docker buildx` and pushes them as one multi-platform image. `IMAGE_REPO` sets another repository (e.g. `IMAGE_REPO=registry.example.com/mcloud-android-connector`), `VERSION` is the tag and the
@@ -20,15 +22,33 @@ make push VERSION=3.1    # built by docker buildx and pushed: docker login publi
 
 The file `VERSION` is the release in work (bumped by hand after a release, CONVENTIONS.md#versions). The `publish` job of CI pushes the image of every merge into `develop` after all the checks passed: `public.ecr.aws/zebrunner/mcloud-android-connector:<VERSION>-develop-<sha>` (7 characters of the commit) and `<VERSION>-develop-latest`, the newest commit of `develop`.
 
+## Run
+
+mcloud-agent creates the container (`roles/common/files/zebrunner-farm`, `device-<name>-<udid>-connector`, where `<name>` is the name of the device in `mcloud-devices.txt`) on the docker network of the farm (`STF_DOCKER_NETWORK`); the STF and Appium containers of the device link to it as `connector` and use its adb server `connector:5037`. A USB device of a Linux host:
+
+```bash
+docker run -d --name device-<name>-<udid>-connector --net infra --restart on-failure:<restarts> \
+  --device /dev/device-<name>-<udid>:/dev/bus/usb/<bus>/<device> -e DEVICE_BUS=/dev/bus/usb/<bus>/<device> \
+  -v mcloud-key-volume:/root/.android \
+  -v device-<name>-<udid>:/tmp/log \
+  public.ecr.aws/zebrunner/mcloud-android-connector:2.0
+```
+
+- `--device /dev/device-<name>-<udid>:/dev/bus/usb/<bus>/<device>` and `DEVICE_BUS`: the USB device, the symlink of the udev rule of mcloud-agent passed at the path of its bus, which `usbreset` resets when adb loses the device (`usb` on Linux only).
+- `/root/.android`: the adb key, one volume shared by the connectors of the host, so a device authorizes the host once and stays authorized over the container recreations.
+- `/tmp/log`: the log volume of the device, mcloud-agent mounts it into all its containers (the connector logs to the container output only).
+- A wireless device or an emulator: `-e ANDROID_DEVICE=<host>:<port>` without `--device` and `DEVICE_BUS`. A USB device of a macOS host (Docker of macOS has no USB): `-e ADB_TRANSPORT_SERVER=host.docker.internal:5037 -e ADB_TRANSPORT_SERIAL=<serial> -e ADB_TRANSPORT_PORT=<port>`, see [USB device of a macOS host](#usb-device-of-a-macos-host).
+- No port is published: the other containers of the device reach the adb server on the docker network. mcloud-agent also passes `PLATFORM_NAME` and `DEVICE_UDID`, which the connector does not read.
+
 ## Configuration
 
-Set these environment variables when starting the container. The entrypoint validates the numeric variables (`ADB_PORT` and `ADB_POLLING_SEC` must be non-negative integers) before anything is started.
+Set these environment variables when starting the container. The entrypoint validates the configuration before anything is started, logs every invalid variable and exits with `0`: the non-negative integers `ADB_PORT` and `ADB_POLLING_SEC`; with `ADB_TRANSPORT_SERVER` set, it must be `<host>:<port>`, `ADB_TRANSPORT_SERIAL` is required and `ADB_TRANSPORT_PORT` is a non-negative integer.
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `ANDROID_DEVICE` | empty | Remote device to connect with `adb connect` in `host:port` form (for example a Wi-Fi device or an emulator). If empty, the device is expected on USB. |
 | `DEVICE_BUS` | empty | USB device path (for example `/dev/bus/usb/001/002`) that is reset with `usbreset` when the USB device is lost (the `USBDEVFS_RESET` ioctl; `usbreset -h` shows the other strategies: `-u` driver unbind/bind, `-a` the `authorized` toggle). |
-| `ADB_PORT` | `5037` | Port of the adb server; the entrypoint and the healthcheck use the same port. |
+| `ADB_PORT` | `5037` | Port of the adb server; the entrypoint and the healthcheck use the same port. Keep `5037` with mcloud-agent: it does not pass `ADB_PORT`, the STF and Appium containers use `connector:5037`. |
 | `ADB_POLLING_SEC` | `5` | Delay in seconds between the connection, boot and device state checks. |
 | `ADB_TRANSPORT_SERVER` | empty | The adb server (`host:port`, e.g. `host.docker.internal:5037`) that has the USB device: Docker of macOS has no USB, see [USB device of a macOS host](#usb-device-of-a-macos-host). |
 | `ADB_TRANSPORT_SERIAL` | empty | The serial of the USB device on `ADB_TRANSPORT_SERVER` (required with it). |
@@ -37,8 +57,6 @@ Set these environment variables when starting the container. The entrypoint vali
 | `DEBUG` | `false` | Intercept script exit and wait for `DEBUG_TIMEOUT` seconds. |
 | `DEBUG_TIMEOUT` | `3600` | Debug exit pause duration in seconds. |
 | `VERBOSE` | `false` | Enable Bash command tracing. |
-
-A USB device must be passed into the container (for example with `--device`). The adb keys are kept in `/root/.android`, mount a volume there to keep the device authorized over the container recreations.
 
 ## USB device of a macOS host
 
@@ -74,7 +92,7 @@ Every test script prints its checks and writes JUnit XML into `JUNIT_DIR` when i
 
 The GitHub Actions workflow `.github/workflows/ci.yml` runs the same `lint`, `test` and `docker` jobs on pushes and pull requests to `develop`, `main` and `master`.
 
-Dependabot (`.github/dependabot.yml`) opens weekly pull requests for the GitHub Actions, the base image of the `Dockerfile` and the linters of `tests/requirements-lint.txt`. The Alpine packages and platform-tools (its URL and SHA-256) are updated by hand.
+Dependabot (`.github/dependabot.yml`) opens weekly pull requests for the GitHub Actions and the base image of the `Dockerfile`. The linters of `tests/requirements-lint.txt` are the shared ones of mcloud-conventions, updated there and synced; the Alpine packages and platform-tools (its URL and SHA-256) are updated by hand.
 
 The conventions of the style, the formatting and the tooling of this repository are in [CONVENTIONS.md](CONVENTIONS.md), the same in all the MCloud docker image repositories.
 
