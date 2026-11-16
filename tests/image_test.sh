@@ -63,6 +63,14 @@ fi
 check_contains "usbreset works" "Usage:" "$(in_image usbreset)"
 check_contains "usbreset is the build of tools/usbreset (its strategies)" "[-i|-u|-a]" "$(in_image usbreset --help 2>&1)"
 check "usbreset fails for a missing device" "1" "$(in_image sh -c 'usbreset /dev/bus/usb/001/999 > /dev/null 2>&1; echo $?')"
+# -w: a number of milliseconds from 0 to 60000, checked before the device
+for value in abc 5s -1 60001 4294968; do
+  output="$(in_image sh -c "usbreset -w ${value} /dev/bus/usb/001/999 2>&1; echo \"exit \$?\"")"
+  check_contains "usbreset -w ${value} is refused" "-w: '${value}' is not a number of milliseconds from 0 to 60000" "$output"
+  check_contains "usbreset -w ${value} exits with 1" "exit 1" "$output"
+done
+check_contains "usbreset -w 60000 is accepted" "/dev/bus/usb/001/999: open:" \
+  "$(in_image sh -c 'usbreset -w 60000 /dev/bus/usb/001/999 2>&1')"
 check_not_contains "the downloads are removed" "platform-tools" "$(in_image ls /tmp)"
 
 section "pinned versions"
