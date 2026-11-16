@@ -56,7 +56,7 @@ Docker of macOS has no USB, so a USB device stays on the adb server of the host 
 
 - Exit code `0` means a problem that a restart does not fix: invalid configuration, an unauthorized device (authorize it manually, also the adb server of the host with `ADB_TRANSPORT_SERVER`), a device in a state that needs troubleshooting (`recovery`, `rescue`, `sideload`, no permissions, ...), or a device that stays in a temporary state (`authorizing`, `connecting`, `unknown`, `bootloader`) for 10 checks.
 - Exit code `1` asks for a restart: the USB device is missing on `ADB_TRANSPORT_SERVER` or its port can't be forwarded, the adb server is not running (an adb client call would start a new one without remote access, so it is checked during the startup and before every device check), the remote device can't be connected or is lost, the device is not fully booted, or the USB device is lost and its port can't be reset with `usbreset`.
-- An `offline` device is reconnected with `adb reconnect`, a lost USB device gets its `DEVICE_BUS` port reset, the checks go on after that.
+- An `offline` device is reconnected with `adb reconnect`, a lost USB device gets its `DEVICE_BUS` port reset, the checks go on after that; a device still offline or lost after 10 checks exits with `1` (a restart connects it again).
 - The image healthcheck expects `adb -P ${ADB_PORT} get-state` to return `device`.
 - Set `DEBUG=true` to keep the container alive for `DEBUG_TIMEOUT` seconds after the entrypoint exits, and `LOGGER_LEVEL=DEBUG` or `VERBOSE=true` for more output.
 
