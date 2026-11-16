@@ -13,11 +13,11 @@ PREFIX="mcloud-android-connector-test-$$"
 require_cmd docker
 docker info > /dev/null 2>&1 || skip "requires a running docker daemon"
 
-# cleanup: removes the container of the adb server checks
+# cleanup: removes the containers of the adb server and stop checks
 # called by the EXIT trap of lib.sh
 # shellcheck disable=SC2329
 cleanup() {
-  docker rm --force "${PREFIX}-server" > /dev/null 2>&1
+  docker rm --force "${PREFIX}-server" "${PREFIX}-stop" > /dev/null 2>&1
 }
 
 # in_image <command...>: runs the command in a new container of the image instead of the entrypoint
@@ -110,6 +110,16 @@ OUT="$(docker logs "${PREFIX}-server" 2>&1)"
 check_contains "stopped adb server is reported" "Adb server is not running. Restarting!" "$OUT"
 check_not_contains "stopped adb server ends the connect retries" "is not connected!" "$OUT"
 check "stopped adb server exits with 1" "1" "$STATUS"
+
+# docker stop: the entrypoint is PID 1, it stops at once in a wait (the boot wait without a device)
+docker run --detach --name "${PREFIX}-stop" --platform "$PLATFORM" --env ADB_POLLING_SEC=60 "$IMAGE" > /dev/null
+sleep 5
+started="$SECONDS"
+docker stop --time 30 "${PREFIX}-stop" > /dev/null
+check "docker stop ends the entrypoint at once, without SIGKILL" "true" \
+  "$([[ $((SECONDS - started)) -lt 10 ]] && echo true || echo false)"
+check "docker stop exits with 0" "0" "$(docker inspect "${PREFIX}-stop" --format '{{.State.ExitCode}}')"
+check_contains "the stop is logged" "Stopped. Exiting!" "$(docker logs "${PREFIX}-stop" 2>&1)"
 
 section "configuration validation"
 run_image --env ADB_PORT=abc
