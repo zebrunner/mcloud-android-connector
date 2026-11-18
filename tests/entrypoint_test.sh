@@ -196,7 +196,7 @@ check_not_contains "ERROR level hides info" "[INFO]" "$OUT"
 section "adb server"
 scenario
 run_entrypoint
-check_contains "banner" "MCLOUD-ANDROID-CONNECTOR" "$OUT"
+check_contains "banner" $'\xe2\x94\x81\xe2\x94\x81 mcloud-android-connector ' "$OUT"
 check "adb server allows remote access on its port" "-a -P 5037 server nodaemon" "$(calls adb | grep ' server ')"
 check "adb clients use the server port" "5037" "$(sort -u "${WORK}/ports.log" | tr '\n' ' ' | sed 's/ $//')"
 

@@ -71,6 +71,8 @@ COPY util/ /opt/zebrunner/util/
 COPY entrypoint.sh /opt/zebrunner/
 
 ARG VERSION=dev
+# the version of the image in the first log line
+ENV IMAGE_VERSION="${VERSION}"
 LABEL org.opencontainers.image.title="Zebrunner MCloud Android Connector" \
       org.opencontainers.image.description="The adb server of an Android device of Zebrunner MCloud" \
       org.opencontainers.image.source="https://github.com/zebrunner/mcloud-android-connector" \

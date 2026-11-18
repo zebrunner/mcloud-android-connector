@@ -53,6 +53,7 @@ Set these environment variables when starting the container. The entrypoint vali
 | `ADB_TRANSPORT_SERVER` | empty | The adb server (`host:port`, e.g. `host.docker.internal:5037`) that has the USB device: Docker of macOS has no USB, see [USB device of a macOS host](#usb-device-of-a-macos-host). |
 | `ADB_TRANSPORT_SERIAL` | empty | The serial of the USB device on `ADB_TRANSPORT_SERVER` (required with it). |
 | `ADB_TRANSPORT_PORT` | `5555` | The port of the host that `ADB_TRANSPORT_SERVER` forwards to adbd of the device, unique for every device of the host. |
+| `IMAGE_VERSION` | the `VERSION` of the build | The version of the image in the first log line. |
 | `LOGGER_LEVEL` | `INFO` | Minimum log level: `DEBUG`, `INFO`, `WARN`, or `ERROR`. |
 | `DEBUG` | `false` | Intercept script exit and wait for `DEBUG_TIMEOUT` seconds. |
 | `DEBUG_TIMEOUT` | `3600` | Debug exit pause duration in seconds. |
