@@ -97,7 +97,7 @@ done
 section "startup"
 # the unreachable remote device is retried 10 times, then the entrypoint asks for a restart
 run_image --env ANDROID_DEVICE=127.0.0.1:1 --env ADB_POLLING_SEC=0 --env ADB_PORT=5038
-check_contains "banner" "MCLOUD-ANDROID-CONNECTOR" "$OUT"
+check_contains "banner" $'\xe2\x94\x81\xe2\x94\x81 mcloud-android-connector ' "$OUT"
 check_contains "the adb server answers on ADB_PORT" "failed to connect to" "$OUT"
 check_not_contains "the adb clients do not start another server" "daemon not running" "$OUT"
 check_contains "unreachable remote device is reported" "Device 127.0.0.1:1 is not connected!" "$OUT"

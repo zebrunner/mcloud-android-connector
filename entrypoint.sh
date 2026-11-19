@@ -5,7 +5,8 @@
 # shellcheck source=util/logger.sh
 . /opt/zebrunner/util/logger.sh
 
-logger "INFO" "\n\n\n\t\tMCLOUD-ANDROID-CONNECTOR\n\n"
+# the first log line: the image, its version and the device (CONVENTIONS.md#terminal-output)
+loggerBanner mcloud-android-connector "${IMAGE_VERSION:-dev}"
 
 #### Stop
 # docker stop sends SIGTERM to the entrypoint, PID 1 of the container: without a handler PID 1 ignores it and docker
