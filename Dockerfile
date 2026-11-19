@@ -2,7 +2,7 @@
 ARG TARGETARCH
 
 # usbreset (tools/usbreset): the connector resets the USB device of its Android device with it (DEVICE_BUS)
-FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS usbreset
+FROM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS usbreset
 
 RUN apk add --no-cache \
         build-base=0.5-r4 linux-headers=7.0.0-r1
@@ -11,7 +11,7 @@ RUN mkdir -p /out && \
     cc -Wall -Wextra -Werror -O2 /src/usbreset.c -o /out/usbreset
 
 # adb of linux/amd64: the official platform-tools, a glibc build (gcompat, libstdc++ and its libc++.so next to it)
-FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS base-amd64
+FROM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS base-amd64
 
 RUN apk add --no-cache \
         bash=5.3.9-r1 gcompat=1.1.0-r4 libstdc++=15.2.0-r5
@@ -27,7 +27,7 @@ RUN wget -q -O /tmp/platform-tools.zip https://dl.google.com/android/repository/
 
 # adb of linux/arm64: Google publishes no platform-tools for it, the adb of Alpine speaks the same protocol (1.0.41);
 # the image gets adb and its libraries only, not the dependencies of the package (python3, protoc, ...)
-FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS adb-arm64
+FROM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS adb-arm64
 
 RUN apk add --no-cache \
         android-tools-adb=35.0.2-r21
@@ -37,7 +37,7 @@ RUN mkdir -p /out/lib && \
     cp /usr/bin/adb /out/ && \
     ldd /usr/bin/adb | awk '$3 ~ /^\/usr\/lib\// { print $3 }' | xargs -I {} cp -L {} /out/lib/
 
-FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS base-arm64
+FROM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS base-arm64
 
 RUN apk add --no-cache \
         bash=5.3.9-r1
