@@ -7,7 +7,7 @@ cd "$REPO" || exit 1
 
 (("$(bash -c 'echo "${BASH_VERSINFO[0]}"')" >= 4)) || skip "requires bash 4 in PATH"
 
-sed -e "s#/opt/zebrunner/#${REPO}/#g" entrypoint.sh > "${WORK}/entrypoint.sh"
+sed -e "s#/opt/zebrunner/#${REPO}/#g" -e "s#/root/.android/#${WORK}/android/#g" entrypoint.sh > "${WORK}/entrypoint.sh"
 
 # the stubs read their behavior from the FAKE_* variables of the scenario
 export FAKE_WORK="$WORK"
@@ -103,6 +103,10 @@ case "$1" in
         fi
         echo "  DisplayDeviceInfo{\"Built-in Screen\": 1080 x 1920, 60.0 fps}" ;;
       *df\ -h*) echo "Filesystem      Size  Used Avail Use% Mounted on" ;;
+      # FAKE_UIDS=none: the log of the device tells that an app got no UID
+      *logcat*"valid UID"*)
+        [[ "$FAKE_UIDS" == none ]] &&
+          echo "E PackageManager: Package jp.co.cyberagent.stf could not be assigned a valid UID" ;;
     esac ;;
   get-state)
     n=$(counter state)
@@ -110,6 +114,7 @@ case "$1" in
     [[ "$n" -ge "${#states[@]}" ]] && n=$((${#states[@]} - 1))
     echo "${states[$n]}" ;;
   install) echo "Success" ;;
+  get-serialno) echo "R28M:1384" ;;
 esac
 exit 0'
 
@@ -130,10 +135,12 @@ scenario() {
   FAKE_TCP_PORT=''
   FAKE_FORWARD=ok
   FAKE_STOP_SLEEP=0
-  export FAKE_STOP_SLEEP FAKE_TRANSPORT_STATES FAKE_TCP_PORT FAKE_FORWARD
+  FAKE_UIDS=ok
+  export FAKE_UIDS FAKE_STOP_SLEEP FAKE_TRANSPORT_STATES FAKE_TCP_PORT FAKE_FORWARD
   export FAKE_SERVER FAKE_CONNECT FAKE_CONNECT_FAILS FAKE_DEVICE_STATE FAKE_OTHER_DEVICE FAKE_BOOT FAKE_BOOT_FAILS FAKE_STATES FAKE_USBRESET
   export ANDROID_DEVICE='' DEVICE_BUS=/dev/bus/usb/001/002 ADB_PORT=5037 ADB_POLLING_SEC=0 LOGGER_LEVEL=DEBUG
   unset DEBUG VERBOSE ANDROID_ADB_SERVER_PORT ADB_TRANSPORT_SERVER ADB_TRANSPORT_SERIAL ADB_TRANSPORT_PORT
+  unset ALLOW_REBOOT REBOOT_INTERVAL
 }
 
 # run_entrypoint: output of the entrypoint in $OUT, its exit status in $STATUS
@@ -444,6 +451,67 @@ for state in recovery rescue sideload host "error: insufficient permissions for 
   check_contains "'${state}' asks for troubleshooting" "Troubleshoot device manually to define the best strategy." "$OUT"
   check "'${state}' exits with 0" "0" "$STATUS"
 done
+
+section "no free app UIDs"
+lastReboot="${WORK}/android/reboot/R28M_1384"
+rm -rf "${WORK}/android"
+scenario
+FAKE_UIDS=none
+FAKE_STATES=device
+run_entrypoint
+check_contains "no free app UIDs are reported" "The device has no free app UIDs, apps can't be installed (STFService of STF): E PackageManager: Package jp.co.cyberagent.stf could not be assigned a valid UID" "$OUT"
+check_contains "without ALLOW_REBOOT the reboot is recommended" "Device reboot is recommended (ALLOW_REBOOT=true reboots it)!" "$OUT"
+check "without ALLOW_REBOOT the device is not rebooted" "0" "$(count '^reboot' "$(calls adb)")"
+check "the report is once per start" "1" "$(count "has no free app UIDs" "$OUT")"
+check "the log of the device is not read again after the report" "1" "$(count 'logcat' "$(calls adb)")"
+check "without ALLOW_REBOOT the device keeps running until the stop" "0" "$STATUS"
+
+scenario
+FAKE_UIDS=none
+export ALLOW_REBOOT=true
+run_entrypoint
+check "ALLOW_REBOOT reboots the device" "1" "$(count '^reboot$' "$(calls adb)")"
+check_contains "the reboot is reported" "Rebooting the device to free the app UIDs!" "$OUT"
+check "the reboot restarts the container" "1" "$STATUS"
+check "the time of the reboot is kept in the volume of the adb key" "true" \
+  "$([[ "$(cat "$lastReboot" 2> /dev/null)" =~ ^[0-9]+$ ]] && echo true || echo false)"
+
+scenario
+FAKE_UIDS=none
+FAKE_STATES=device
+export ALLOW_REBOOT=TRUE
+run_entrypoint
+check "no second reboot within REBOOT_INTERVAL" "0" "$(count '^reboot' "$(calls adb)")"
+check_contains "no free app UIDs within REBOOT_INTERVAL after the reboot need a person" "seconds after its reboot (one per REBOOT_INTERVAL 21600 seconds): the device needs a person." "$OUT"
+check "the device keeps running within REBOOT_INTERVAL" "0" "$STATUS"
+
+scenario
+FAKE_UIDS=none
+export ALLOW_REBOOT=true REBOOT_INTERVAL=3600
+echo $(($(date +%s) - 4000)) > "$lastReboot"
+run_entrypoint
+check "a reboot older than REBOOT_INTERVAL allows another one" "1" "$(count '^reboot$' "$(calls adb)")"
+
+scenario
+export ALLOW_REBOOT=true
+FAKE_STATES=device
+run_entrypoint
+check "free app UIDs: no reboot" "0" "$(count '^reboot' "$(calls adb)")"
+check_not_contains "free app UIDs: nothing is reported" "app UIDs" "$OUT"
+check "free app UIDs: the log of the device is checked at every device check" "true" \
+  "$([[ "$(count 'logcat' "$(calls adb)")" -gt 1 ]] && echo true || echo false)"
+
+for value in maybe 1; do
+  scenario
+  export ALLOW_REBOOT="$value"
+  run_entrypoint
+  check_contains "ALLOW_REBOOT='${value}' is reported" "ALLOW_REBOOT must be true or false, but it is '${value}'." "$OUT"
+  check "ALLOW_REBOOT='${value}' exits with 0" "0" "$STATUS"
+done
+scenario
+export REBOOT_INTERVAL=abc
+run_entrypoint
+check_contains "REBOOT_INTERVAL='abc' is reported" "REBOOT_INTERVAL must be a non-negative integer, but it is 'abc'." "$OUT"
 
 section "stop"
 scenario
