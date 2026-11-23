@@ -34,11 +34,15 @@ pause() {
 
 # the port of the host forwarded to adbd of the USB device of ADB_TRANSPORT_SERVER, 5555 like adbd itself by default
 ADB_TRANSPORT_PORT="${ADB_TRANSPORT_PORT:-5555}"
+# A reboot of the device when it has no free app UIDs (see checkAppUids)
+ALLOW_REBOOT="${ALLOW_REBOOT:-false}"
+ALLOW_REBOOT="${ALLOW_REBOOT,,}"
+REBOOT_INTERVAL="${REBOOT_INTERVAL:-21600}"
 
 #### Validate configuration
 # A wrong configuration can't be fixed by a restart, so exit with 0 like the other unrecoverable errors
 isConfigValid=1
-numericVars=(ADB_PORT ADB_POLLING_SEC)
+numericVars=(ADB_PORT ADB_POLLING_SEC REBOOT_INTERVAL)
 if [[ -n "$ADB_TRANSPORT_SERVER" ]]; then
   numericVars+=(ADB_TRANSPORT_PORT)
   if [[ ! "$ADB_TRANSPORT_SERVER" =~ ^[^:]+:[0-9]+$ ]]; then
@@ -56,6 +60,10 @@ for var in "${numericVars[@]}"; do
     isConfigValid=0
   fi
 done
+if [[ ! "$ALLOW_REBOOT" =~ ^(true|false)$ ]]; then
+  logger "ERROR" "ALLOW_REBOOT must be true or false, but it is '$ALLOW_REBOOT'."
+  isConfigValid=0
+fi
 if [[ $isConfigValid -eq 0 ]]; then
   logger "ERROR" "Invalid configuration. Exiting!"
   exit 0
@@ -178,6 +186,48 @@ adb shell df -h
 
 logger "Device is fully available."
 
+#### No free app UIDs: only a reboot helps
+# A device that has not been rebooted for long with many installs and uninstalls of apps runs out of the app UIDs of
+# its PackageManager: no app can be installed (STF: "INSTALL_FAILED_INSUFFICIENT_STORAGE: ... could not be assigned a
+# valid UID" of STFService, its container spends its restarts), while the storage is free. A restart of the containers
+# does not help, a reboot of the device frees the UIDs. The time of the last reboot is kept in the volume of the adb
+# key (/root/.android): it survives a new container
+rebootDir="/root/.android/reboot"
+# the device has no free app UIDs and it was reported in this start of the container
+uidsReported=0
+
+# checkAppUids: the log of the device tells that an app got no UID: ALLOW_REBOOT=true reboots it (exit 1), at most once
+# per REBOOT_INTERVAL; otherwise, or within the interval, it is reported once per start of the container
+checkAppUids() {
+  local line
+  local serial
+  local rebootFile
+  local now
+  local last
+  [[ $uidsReported -eq 0 ]] || return 0
+  line=$(adb shell "logcat -d 2> /dev/null | grep -m 1 'could not be assigned a valid UID'" 2> /dev/null | tr -d '\r')
+  [[ -n "$line" ]] || return 0
+  uidsReported=1
+  logger "WARN" "The device has no free app UIDs, apps can't be installed (STFService of STF): ${line}"
+  if [[ "$ALLOW_REBOOT" != "true" ]]; then
+    logger "WARN" "Only a reboot of the device frees the app UIDs. Device reboot is recommended (ALLOW_REBOOT=true reboots it)!"
+    return 0
+  fi
+  serial=$(adb get-serialno 2> /dev/null | tr -d '\r' | tr -c 'A-Za-z0-9._\n-' '_')
+  rebootFile="${rebootDir}/${serial:-device}"
+  now=$(date +%s)
+  last=$(cat "$rebootFile" 2> /dev/null)
+  if [[ "$last" =~ ^[0-9]+$ ]] && [[ $((now - last)) -lt $REBOOT_INTERVAL ]]; then
+    logger "ERROR" "The device has no free app UIDs again, $((now - last)) seconds after its reboot (one per REBOOT_INTERVAL ${REBOOT_INTERVAL} seconds): the device needs a person."
+    return 0
+  fi
+  mkdir -p "$rebootDir"
+  echo "$now" > "$rebootFile"
+  logger "WARN" "Rebooting the device to free the app UIDs!"
+  adb reboot
+  exit 1
+}
+
 #### Entrypoint holder
 while :; do
   isAvailable=0
@@ -245,5 +295,6 @@ while :; do
     exit 0
   fi
 
+  checkAppUids
   pause 33
 done

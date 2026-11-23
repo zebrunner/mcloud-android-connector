@@ -42,7 +42,7 @@ docker run -d --name device-<name>-<udid>-connector --net infra --restart on-fai
 
 ## Configuration
 
-Set these environment variables when starting the container. The entrypoint validates the configuration before anything is started, logs every invalid variable and exits with `0`: the non-negative integers `ADB_PORT` and `ADB_POLLING_SEC`; with `ADB_TRANSPORT_SERVER` set, it must be `<host>:<port>`, `ADB_TRANSPORT_SERIAL` is required and `ADB_TRANSPORT_PORT` is a non-negative integer.
+Set these environment variables when starting the container. The entrypoint validates the configuration before anything is started, logs every invalid variable and exits with `0`: the non-negative integers `ADB_PORT`, `ADB_POLLING_SEC` and `REBOOT_INTERVAL`, `ALLOW_REBOOT` (`true` or `false`, case-insensitive); with `ADB_TRANSPORT_SERVER` set, it must be `<host>:<port>`, `ADB_TRANSPORT_SERIAL` is required and `ADB_TRANSPORT_PORT` is a non-negative integer.
 
 | Variable | Default | Description |
 | --- | --- | --- |
@@ -53,6 +53,8 @@ Set these environment variables when starting the container. The entrypoint vali
 | `ADB_TRANSPORT_SERVER` | empty | The adb server (`host:port`, e.g. `host.docker.internal:5037`) that has the USB device: Docker of macOS has no USB, see [USB device of a macOS host](#usb-device-of-a-macos-host). |
 | `ADB_TRANSPORT_SERIAL` | empty | The serial of the USB device on `ADB_TRANSPORT_SERVER` (required with it). |
 | `ADB_TRANSPORT_PORT` | `5555` | The port of the host that `ADB_TRANSPORT_SERVER` forwards to adbd of the device, unique for every device of the host. |
+| `ALLOW_REBOOT` | `false` | `true`: the device is rebooted when it has no free app UIDs, see [Reboot](#reboot). |
+| `REBOOT_INTERVAL` | `21600` | At most one reboot of the device per this many seconds. |
 | `IMAGE_VERSION` | the `VERSION` of the build | The version of the image in the first log line. |
 | `LOGGER_LEVEL` | `INFO` | Minimum log level: `DEBUG`, `INFO`, `WARN`, or `ERROR`. |
 | `DEBUG` | `false` | Intercept script exit and wait for `DEBUG_TIMEOUT` seconds. |
@@ -69,14 +71,21 @@ Docker of macOS has no USB, so a USB device stays on the adb server of the host 
 2. With `ADB_TRANSPORT_SERVER` set, the USB device of the host server is forwarded and becomes `ANDROID_DEVICE` (see above).
 3. With `ANDROID_DEVICE` set, the device is connected with `adb connect` (10 attempts).
 4. The entrypoint waits until `adb shell dumpsys display` returns the display info, so the device is fully booted (60 attempts, `ADB_POLLING_SEC` apart), and prints the filesystem usage of the device.
-5. Every 33 seconds the device state (`adb get-state`) is checked.
+5. Every 33 seconds the device state (`adb get-state`) is checked, and the log of the device for an app without a UID (see [Reboot](#reboot)).
 
 `docker stop` ends the entrypoint (PID 1 of the container) at once, also in a wait: it stops the adb server and exits with `0`.
+
+## Reboot
+
+A device that has not been rebooted for long, with many installs and uninstalls of apps, runs out of the app UIDs of its PackageManager: no app can be installed, e.g. STFService of STF (`INSTALL_FAILED_INSUFFICIENT_STORAGE: Scanning Failed.: Package jp.co.cyberagent.stf could not be assigned a valid UID`, while the storage is free), and the STF container of the device spends its restarts. Restarting the containers does not help, a reboot of the device frees the UIDs. The connector looks for `could not be assigned a valid UID` in the log of the device (`adb shell logcat -d`, filtered on the device) at every device check:
+
+- `ALLOW_REBOOT=false` (the default): the log says `Device reboot is recommended`, once per start of the container.
+- `ALLOW_REBOOT=true`: `adb reboot`, then exit `1`; a USB device gets its containers created again when it reconnects, a remote one is connected again by the restart. At most one reboot per `REBOOT_INTERVAL`: the time of the last one is kept in `/root/.android/reboot/<serial>` (the volume of the adb key survives a new container); the same failure within it is reported once (`the device needs a person`) and the connector keeps running (adb, Appium and the other apps still work).
 
 ## Exit codes and health
 
 - Exit code `0` means a problem that a restart does not fix or a stop: `docker stop` (`SIGTERM`), invalid configuration, an unauthorized device (authorize it manually, also the adb server of the host with `ADB_TRANSPORT_SERVER`), a device in a state that needs troubleshooting (`recovery`, `rescue`, `sideload`, no permissions, ...), or a device that stays in a temporary state (`authorizing`, `connecting`, `unknown`, `bootloader`) for 10 checks.
-- Exit code `1` asks for a restart: the USB device is missing on `ADB_TRANSPORT_SERVER` or its port can't be forwarded, the adb server is not running (an adb client call would start a new one without remote access, so it is checked during the startup and before every device check), the remote device can't be connected or is lost, the device is not fully booted, or the USB device is lost and its port can't be reset with `usbreset`.
+- Exit code `1` asks for a restart: the USB device is missing on `ADB_TRANSPORT_SERVER` or its port can't be forwarded, the adb server is not running (an adb client call would start a new one without remote access, so it is checked during the startup and before every device check), the remote device can't be connected or is lost, the device is not fully booted, the USB device is lost and its port can't be reset with `usbreset`, or the device was rebooted because it has no free app UIDs (`ALLOW_REBOOT`).
 - An `offline` device is reconnected with `adb reconnect`, a lost USB device gets its `DEVICE_BUS` port reset, the checks go on after that; a device still offline or lost after 10 checks exits with `1` (a restart connects it again).
 - The image healthcheck expects `adb -P ${ADB_PORT} get-state` to return `device`.
 - Set `DEBUG=true` to keep the container alive for `DEBUG_TIMEOUT` seconds after the entrypoint exits, and `LOGGER_LEVEL=DEBUG` or `VERBOSE=true` for more output.
@@ -88,7 +97,7 @@ Docker of macOS has no USB, so a USB device stays on the adb server of the host 
 | Target | What it checks |
 | --- | --- |
 | `make lint` | `tests/lint.sh`: yamllint, actionlint, hadolint, pymarkdown, `bash -n`, ShellCheck and shfmt (style of `.editorconfig`), every env var of the `Dockerfile` documented in this README, the text file checks of CONVENTIONS.md. The tools are installed into `.venv` from `tests/requirements-lint.txt`; hadolint comes from `brew install hadolint` on macOS. |
-| `make test` | The static checks of the repository (`tests/repo_test.sh`: the pins of the `Dockerfile`, the Dependabot configuration) and the tests of `util/logger.sh`, `util/debug.sh` and `entrypoint.sh`: configuration validation, the adb server port and its liveness, USB and remote devices, the boot wait, every device state of the holder with its retry limits, `SIGTERM`, the `DEBUG` and `VERBOSE` modes. The tools are stubs (`adb`, `usbreset`, `sleep`), so no docker and no Android device are needed, but bash 4+ is (on macOS `brew install bash`). |
+| `make test` | The static checks of the repository (`tests/repo_test.sh`: the pins of the `Dockerfile`, the Dependabot configuration) and the tests of `util/logger.sh`, `util/debug.sh` and `entrypoint.sh`: configuration validation, the adb server port and its liveness, USB and remote devices, the boot wait, every device state of the holder with its retry limits, the reboot of a device without free app UIDs, `SIGTERM`, the `DEBUG` and `VERBOSE` modes. The tools are stubs (`adb`, `usbreset`, `sleep`), so no docker and no Android device are needed, but bash 4+ is (on macOS `brew install bash`). |
 | `make docker` | `tests/image_test.sh`: builds the image (`PLATFORM`: `linux/amd64` by default or `linux/arm64`, `IMAGE` overrides its tag, `REBUILD=true` rebuilds it), checks its contents, the installed versions of the pinned packages, configuration, configuration validation and the entrypoint startup without a device, also with a stopped adb server, and `docker stop`. |
 
 Every test script prints its checks and writes JUnit XML into `JUNIT_DIR` when it is set.

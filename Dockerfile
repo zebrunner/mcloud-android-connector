@@ -57,6 +57,9 @@ ENV ANDROID_DEVICE="" \
     ADB_TRANSPORT_SERVER="" \
     ADB_TRANSPORT_SERIAL="" \
     ADB_TRANSPORT_PORT=5555 \
+    # a reboot of the device when it has no free app UIDs (README.md#reboot)
+    ALLOW_REBOOT=false \
+    REBOOT_INTERVAL=21600 \
     # Debug mode vars
     DEBUG=false \
     DEBUG_TIMEOUT=3600 \
