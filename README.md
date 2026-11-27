@@ -42,7 +42,7 @@ docker run -d --name device-<name>-<udid>-connector --net infra --restart on-fai
 
 ## Configuration
 
-Set these environment variables when starting the container. The entrypoint validates the configuration before anything is started, logs every invalid variable and exits with `0`: the non-negative integers `ADB_PORT`, `ADB_POLLING_SEC` and `REBOOT_INTERVAL`, `ALLOW_REBOOT` (`true` or `false`, case-insensitive); with `ADB_TRANSPORT_SERVER` set, it must be `<host>:<port>`, `ADB_TRANSPORT_SERIAL` is required and `ADB_TRANSPORT_PORT` is a non-negative integer.
+Set these environment variables when starting the container. The entrypoint validates the configuration before anything is started, logs every invalid variable and exits with `0`: the non-negative integers `ADB_PORT`, `ADB_POLLING_SEC`, `REBOOT_INTERVAL` and `REBOOT_CONFIRM_TIMEOUT`, `ALLOW_REBOOT` (`true` or `false`, case-insensitive); with `ADB_TRANSPORT_SERVER` set, it must be `<host>:<port>`, `ADB_TRANSPORT_SERIAL` is required and `ADB_TRANSPORT_PORT` is a non-negative integer.
 
 | Variable | Default | Description |
 | --- | --- | --- |
@@ -54,7 +54,8 @@ Set these environment variables when starting the container. The entrypoint vali
 | `ADB_TRANSPORT_SERIAL` | empty | The serial of the USB device on `ADB_TRANSPORT_SERVER` (required with it). |
 | `ADB_TRANSPORT_PORT` | `5555` | The port of the host that `ADB_TRANSPORT_SERVER` forwards to adbd of the device, unique for every device of the host. |
 | `ALLOW_REBOOT` | `false` | `true`: the device is rebooted when it has no free app UIDs, see [Reboot](#reboot). |
-| `REBOOT_INTERVAL` | `21600` | At most one reboot of the device per this many seconds. |
+| `REBOOT_INTERVAL` | `21600` | At most one reboot of the device per this many seconds. Only a confirmed reboot counts. |
+| `REBOOT_CONFIRM_TIMEOUT` | `30` | How long in seconds the device has to show its reboot after `adb reboot` (it disconnects or gets a new boot id), see [Reboot](#reboot). |
 | `IMAGE_VERSION` | the `VERSION` of the build | The version of the image in the first log line. |
 | `LOGGER_LEVEL` | `INFO` | Minimum log level: `DEBUG`, `INFO`, `WARN`, or `ERROR`. |
 | `DEBUG` | `false` | Intercept script exit and wait for `DEBUG_TIMEOUT` seconds. |
@@ -81,6 +82,7 @@ A device that has not been rebooted for long, with many installs and uninstalls 
 
 - `ALLOW_REBOOT=false` (the default): the log says `Device reboot is recommended`, once per start of the container.
 - `ALLOW_REBOOT=true`: `adb reboot`, then exit `1`; a USB device gets its containers created again when it reconnects, a remote one is connected again by the restart. At most one reboot per `REBOOT_INTERVAL`: the time of the last one is kept in `/root/.android/reboot/<serial>` (the volume of the adb key survives a new container); the same failure within it is reported once (`the device needs a person`) and the connector keeps running (adb, Appium and the other apps still work).
+- The reboot is confirmed within `REBOOT_CONFIRM_TIMEOUT` seconds: the device leaves the `device` state of adb (it disconnects) or its boot id (`/proc/sys/kernel/random/boot_id`, new on every boot) changes; without a sign `adb reboot` is sent once more. Only a confirmed reboot is written to `/root/.android/reboot/<serial>`. A device that does not reboot on both commands is logged (`The device did not reboot on 'adb reboot' (2 attempts)`), nothing is recorded and the connector keeps running.
 
 ## Exit codes and health
 
