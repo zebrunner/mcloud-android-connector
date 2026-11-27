@@ -13,8 +13,9 @@ RUN mkdir -p /out && \
 # adb of linux/amd64: the official platform-tools, a glibc build (gcompat, libstdc++ and its libc++.so next to it)
 FROM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS base-amd64
 
+# iptables: the peer filter of the listeners (util/peerfilter.sh)
 RUN apk add --no-cache \
-        bash=5.3.9-r1 gcompat=1.1.0-r4 libstdc++=15.2.0-r5
+        bash=5.3.9-r1 gcompat=1.1.0-r4 libstdc++=15.2.0-r5 iptables=1.8.13-r0
 
 RUN wget -q -O /tmp/platform-tools.zip https://dl.google.com/android/repository/platform-tools_r37.0.1-linux.zip && \
     echo "d230f13842f60f782a8645f9c813f8f845bf36089ea7289f28c48f17979313f1  /tmp/platform-tools.zip" > /tmp/platform-tools.sha256 && \
@@ -39,8 +40,9 @@ RUN mkdir -p /out/lib && \
 
 FROM alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS base-arm64
 
+# iptables: the peer filter of the listeners (util/peerfilter.sh)
 RUN apk add --no-cache \
-        bash=5.3.9-r1
+        bash=5.3.9-r1 iptables=1.8.13-r0
 COPY --from=adb-arm64 /out/lib/ /usr/lib/
 COPY --from=adb-arm64 /out/adb /usr/local/bin/adb
 RUN adb version
@@ -57,6 +59,9 @@ ENV ANDROID_DEVICE="" \
     ADB_TRANSPORT_SERVER="" \
     ADB_TRANSPORT_SERIAL="" \
     ADB_TRANSPORT_PORT=5555 \
+    # the containers that open connections to the connector, the others are dropped (README.md#peer-filter)
+    CONNECTOR_PEERS="" \
+    PEER_FILTER_INTERVAL=2 \
     # a reboot of the device when it has no free app UIDs (README.md#reboot)
     ALLOW_REBOOT=false \
     REBOOT_INTERVAL=21600 \
