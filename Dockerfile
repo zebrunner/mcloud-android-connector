@@ -60,6 +60,7 @@ ENV ANDROID_DEVICE="" \
     # a reboot of the device when it has no free app UIDs (README.md#reboot)
     ALLOW_REBOOT=false \
     REBOOT_INTERVAL=21600 \
+    REBOOT_CONFIRM_TIMEOUT=30 \
     # Debug mode vars
     DEBUG=false \
     DEBUG_TIMEOUT=3600 \

@@ -38,11 +38,13 @@ ADB_TRANSPORT_PORT="${ADB_TRANSPORT_PORT:-5555}"
 ALLOW_REBOOT="${ALLOW_REBOOT:-false}"
 ALLOW_REBOOT="${ALLOW_REBOOT,,}"
 REBOOT_INTERVAL="${REBOOT_INTERVAL:-21600}"
+# How long in seconds the device has to show its reboot after 'adb reboot' (see rebootDevice)
+REBOOT_CONFIRM_TIMEOUT="${REBOOT_CONFIRM_TIMEOUT:-30}"
 
 #### Validate configuration
 # A wrong configuration can't be fixed by a restart, so exit with 0 like the other unrecoverable errors
 isConfigValid=1
-numericVars=(ADB_PORT ADB_POLLING_SEC REBOOT_INTERVAL)
+numericVars=(ADB_PORT ADB_POLLING_SEC REBOOT_INTERVAL REBOOT_CONFIRM_TIMEOUT)
 if [[ -n "$ADB_TRANSPORT_SERVER" ]]; then
   numericVars+=(ADB_TRANSPORT_PORT)
   if [[ ! "$ADB_TRANSPORT_SERVER" =~ ^[^:]+:[0-9]+$ ]]; then
@@ -196,6 +198,56 @@ rebootDir="/root/.android/reboot"
 # the device has no free app UIDs and it was reported in this start of the container
 uidsReported=0
 
+# deviceBootId: the id of the current boot of the device (the kernel makes a new one on every boot), nothing when the
+# device does not answer
+deviceBootId() {
+  adb shell cat /proc/sys/kernel/random/boot_id 2> /dev/null | tr -d '\r' | grep -m 1 -E '^[0-9a-f-]{36}$'
+}
+
+# confirmReboot <boot id before the reboot>: waits REBOOT_CONFIRM_TIMEOUT seconds for a sign of the reboot of the
+# device: it leaves the 'device' state of adb (it disconnects) or its boot id changes. 'adb reboot' may return before
+# the device acts on it or without it, so its result is not a sign. The sign is in rebootSign
+confirmReboot() {
+  local bootBefore="$1"
+  local bootAfter
+  local state
+  local waited
+  rebootSign=""
+  for ((waited = 0; ; waited += 2)); do
+    state=$(adb get-state 2>&1 | tr -d '\r')
+    if [[ "$state" != "device" ]]; then
+      rebootSign="it disconnected ${waited} seconds after 'adb reboot' (${state})"
+      return 0
+    fi
+    bootAfter=$(deviceBootId)
+    if [[ -n "$bootBefore" && -n "$bootAfter" && "$bootAfter" != "$bootBefore" ]]; then
+      rebootSign="its boot id changed ${waited} seconds after 'adb reboot'"
+      return 0
+    fi
+    [[ $waited -lt $REBOOT_CONFIRM_TIMEOUT ]] || break
+    pause 2
+  done
+  return 1
+}
+
+# rebootDevice: 'adb reboot', then the reboot is confirmed (confirmReboot); a reboot without a sign is asked once more.
+# Returns 1 when the device did not reboot
+rebootDevice() {
+  local attempt
+  local bootBefore
+  bootBefore=$(deviceBootId)
+  for attempt in 1 2; do
+    logger "WARN" "Rebooting the device: 'adb reboot' (attempt ${attempt}/2)."
+    adb reboot
+    if confirmReboot "$bootBefore"; then
+      logger "WARN" "The device is rebooting: ${rebootSign}."
+      return 0
+    fi
+    logger "WARN" "'adb reboot' returned, but the device did not reboot within ${REBOOT_CONFIRM_TIMEOUT} seconds: it is still connected and its boot id is the same."
+  done
+  return 1
+}
+
 # checkAppUids: the log of the device tells that an app got no UID: ALLOW_REBOOT=true reboots it (exit 1), at most once
 # per REBOOT_INTERVAL; otherwise, or within the interval, it is reported once per start of the container
 checkAppUids() {
@@ -221,10 +273,15 @@ checkAppUids() {
     logger "ERROR" "The device has no free app UIDs again, $((now - last)) seconds after its reboot (one per REBOOT_INTERVAL ${REBOOT_INTERVAL} seconds): the device needs a person."
     return 0
   fi
-  mkdir -p "$rebootDir"
-  echo "$now" > "$rebootFile"
   logger "WARN" "Rebooting the device to free the app UIDs!"
-  adb reboot
+  if ! rebootDevice; then
+    # no reboot is recorded: it does not count for REBOOT_INTERVAL
+    logger "ERROR" "The device did not reboot on 'adb reboot' (2 attempts): the device needs a person, reboot it by hand."
+    return 0
+  fi
+  # only a confirmed reboot counts for REBOOT_INTERVAL
+  mkdir -p "$rebootDir"
+  date +%s > "$rebootFile"
   exit 1
 }
 

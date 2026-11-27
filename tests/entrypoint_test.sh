@@ -43,7 +43,10 @@ exit 0'
 # FAKE_DEVICE_STATE the state of the connected device in 'adb devices', FAKE_OTHER_DEVICE one more device there,
 # FAKE_BOOT=ok|never|late (FAKE_BOOT_FAILS empty answers first) the answer of 'adb shell dumpsys display',
 # FAKE_SERVER=crash-on-boot stops the server on the first boot check,
-# FAKE_STATES the ';' separated answers of 'adb get-state', the last one is repeated
+# FAKE_STATES the ';' separated answers of 'adb get-state', the last one is repeated;
+# 'adb reboot' (counted in reboot.n) by FAKE_REBOOT: gone (the device disconnects), boot (it stays connected with a new
+# boot id), noop (nothing happens, it stays in the 'device' state), once (the first one is a noop);
+# FAKE_BOOT_ID=none: the boot id is not readable
 # the stub body is expanded when the stub runs
 # shellcheck disable=SC2016
 stub adb 'echo "adb|$*" >> "$FAKE_WORK/calls.log"
@@ -71,6 +74,13 @@ if [[ "$*" == *" server "* ]]; then
   exit 0
 fi
 echo "${ANDROID_ADB_SERVER_PORT:-unset}" >> "$FAKE_WORK/ports.log"
+reboots=$(cat "$FAKE_WORK/reboot.n" 2> /dev/null || echo 0)
+rebooted=""
+case "$FAKE_REBOOT" in
+  noop) ;;
+  once) [[ "$reboots" -ge 2 ]] && rebooted="gone" ;;
+  *) [[ "$reboots" -ge 1 ]] && rebooted="$FAKE_REBOOT" ;;
+esac
 counter() {
   local n
   n=$(cat "$FAKE_WORK/$1.n" 2> /dev/null || echo 0)
@@ -90,8 +100,16 @@ case "$1" in
     echo "List of devices attached"
     [[ -n "$FAKE_OTHER_DEVICE" ]] && printf "%s\tdevice\n" "$FAKE_OTHER_DEVICE"
     [[ -e "$FAKE_WORK/connected" ]] && printf "%s\t%s\n" "$ANDROID_DEVICE" "$FAKE_DEVICE_STATE" ;;
+  reboot) echo $((reboots + 1)) > "$FAKE_WORK/reboot.n" ;;
   shell)
     case "$*" in
+      *boot_id*)
+        [[ "$FAKE_BOOT_ID" == none ]] && exit 0
+        if [[ "$rebooted" == boot ]]; then
+          echo "6f1c2a9e-0b7d-4c55-9a3e-2d8f4b6c1e70"
+        else
+          echo "0c9d7e21-5a4b-4f3c-8e2d-1b6a9f0e3d42"
+        fi ;;
       *dumpsys\ display*)
         n=$(counter boot)
         if [[ "$FAKE_SERVER" == crash-on-boot ]]; then
@@ -109,6 +127,8 @@ case "$1" in
           echo "E PackageManager: Package jp.co.cyberagent.stf could not be assigned a valid UID" ;;
     esac ;;
   get-state)
+    [[ "$rebooted" == gone ]] && { echo "error: no devices/emulators found"; exit 1; }
+    [[ "$reboots" -ge 1 ]] && { echo device; exit 0; }
     n=$(counter state)
     IFS=";" read -r -a states <<< "$FAKE_STATES"
     [[ "$n" -ge "${#states[@]}" ]] && n=$((${#states[@]} - 1))
@@ -136,11 +156,13 @@ scenario() {
   FAKE_FORWARD=ok
   FAKE_STOP_SLEEP=0
   FAKE_UIDS=ok
-  export FAKE_UIDS FAKE_STOP_SLEEP FAKE_TRANSPORT_STATES FAKE_TCP_PORT FAKE_FORWARD
+  FAKE_REBOOT=gone
+  FAKE_BOOT_ID=ok
+  export FAKE_REBOOT FAKE_BOOT_ID FAKE_UIDS FAKE_STOP_SLEEP FAKE_TRANSPORT_STATES FAKE_TCP_PORT FAKE_FORWARD
   export FAKE_SERVER FAKE_CONNECT FAKE_CONNECT_FAILS FAKE_DEVICE_STATE FAKE_OTHER_DEVICE FAKE_BOOT FAKE_BOOT_FAILS FAKE_STATES FAKE_USBRESET
   export ANDROID_DEVICE='' DEVICE_BUS=/dev/bus/usb/001/002 ADB_PORT=5037 ADB_POLLING_SEC=0 LOGGER_LEVEL=DEBUG
   unset DEBUG VERBOSE ANDROID_ADB_SERVER_PORT ADB_TRANSPORT_SERVER ADB_TRANSPORT_SERIAL ADB_TRANSPORT_PORT
-  unset ALLOW_REBOOT REBOOT_INTERVAL
+  unset ALLOW_REBOOT REBOOT_INTERVAL REBOOT_CONFIRM_TIMEOUT
 }
 
 # run_entrypoint: output of the entrypoint in $OUT, its exit status in $STATUS
@@ -492,6 +514,55 @@ echo $(($(date +%s) - 4000)) > "$lastReboot"
 run_entrypoint
 check "a reboot older than REBOOT_INTERVAL allows another one" "1" "$(count '^reboot$' "$(calls adb)")"
 
+section "no free app UIDs: the reboot is confirmed"
+# reboot_scenario: no free app UIDs at the first device check, ALLOW_REBOOT=true and no earlier reboot
+reboot_scenario() {
+  rm -rf "${WORK}/android"
+  scenario
+  FAKE_UIDS=none
+  FAKE_STATES=device
+  export ALLOW_REBOOT=true REBOOT_CONFIRM_TIMEOUT=6
+}
+
+reboot_scenario
+run_entrypoint
+check_contains "the reboot is confirmed when the device disconnects" "The device is rebooting: it disconnected 0 seconds after 'adb reboot' (error: no devices/emulators found)." "$OUT"
+check "the boot id is read before the reboot" "true" "$([[ "$(count 'boot_id' "$(calls adb)")" -ge 1 ]] && echo true || echo false)"
+check "a confirmed reboot is recorded" "true" "$([[ "$(cat "$lastReboot" 2> /dev/null)" =~ ^[0-9]+$ ]] && echo true || echo false)"
+check "a confirmed reboot restarts the container" "1" "$STATUS"
+
+reboot_scenario
+FAKE_REBOOT=once
+run_entrypoint
+check "'adb reboot' without a reboot is asked once more" "2" "$(count '^reboot$' "$(calls adb)")"
+check_contains "the first 'adb reboot' without a reboot is reported" "'adb reboot' returned, but the device did not reboot within 6 seconds: it is still connected and its boot id is the same." "$OUT"
+check_contains "the second attempt is reported" "Rebooting the device: 'adb reboot' (attempt 2/2)." "$OUT"
+check "the reboot confirmed by the second attempt is recorded" "true" "$([[ -e "$lastReboot" ]] && echo true || echo false)"
+check "the reboot confirmed by the second attempt restarts the container" "1" "$STATUS"
+
+reboot_scenario
+FAKE_REBOOT=boot
+run_entrypoint
+check_contains "the reboot is confirmed by a new boot id" "The device is rebooting: its boot id changed 0 seconds after 'adb reboot'." "$OUT"
+check "the reboot confirmed by the boot id is recorded" "true" "$([[ -e "$lastReboot" ]] && echo true || echo false)"
+
+reboot_scenario
+FAKE_REBOOT=noop
+run_entrypoint
+check "a device that does not reboot gets 2 'adb reboot'" "2" "$(count '^reboot$' "$(calls adb)")"
+check_contains "a device that does not reboot needs a person" "The device did not reboot on 'adb reboot' (2 attempts): the device needs a person, reboot it by hand." "$OUT"
+check "a reboot that did not happen is not recorded for REBOOT_INTERVAL" "false" "$([[ -e "$lastReboot" ]] && echo true || echo false)"
+check "a device that does not reboot keeps running (adb, Appium) until the stop" "0" "$STATUS"
+check_contains "a device that does not reboot is still checked" "Device connected successfully." "$(tail -n 5 <<< "$OUT")"
+check_not_contains "a reboot that did not happen is not reported as a reboot" "The device is rebooting" "$OUT"
+
+reboot_scenario
+FAKE_REBOOT=boot
+FAKE_BOOT_ID=none
+run_entrypoint
+check "without the boot id a device that stays connected is not confirmed" "2" "$(count '^reboot$' "$(calls adb)")"
+check "without the boot id nothing is recorded" "false" "$([[ -e "$lastReboot" ]] && echo true || echo false)"
+
 scenario
 export ALLOW_REBOOT=true
 FAKE_STATES=device
@@ -508,10 +579,12 @@ for value in maybe 1; do
   check_contains "ALLOW_REBOOT='${value}' is reported" "ALLOW_REBOOT must be true or false, but it is '${value}'." "$OUT"
   check "ALLOW_REBOOT='${value}' exits with 0" "0" "$STATUS"
 done
-scenario
-export REBOOT_INTERVAL=abc
-run_entrypoint
-check_contains "REBOOT_INTERVAL='abc' is reported" "REBOOT_INTERVAL must be a non-negative integer, but it is 'abc'." "$OUT"
+for var in REBOOT_INTERVAL REBOOT_CONFIRM_TIMEOUT; do
+  scenario
+  export "${var}=abc"
+  run_entrypoint
+  check_contains "${var}='abc' is reported" "${var} must be a non-negative integer, but it is 'abc'." "$OUT"
+done
 
 section "stop"
 scenario
