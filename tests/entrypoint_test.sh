@@ -28,6 +28,11 @@ elif [[ "$1" == 7 ]]; then
   # the refresh of the peer filter (PEER_FILTER_INTERVAL=7 of the tests)
   /bin/sleep 0.3
 elif [[ "$1" == 33 ]]; then
+  # FAKE_PEER_WAIT=1: the first holder check waits for two refreshes of the peer filter
+  if [[ "$FAKE_PEER_WAIT" == 1 && ! -e "$FAKE_WORK/peer.waited" ]]; then
+    touch "$FAKE_WORK/peer.waited"
+    /bin/sleep 1.5
+  fi
   n=$(cat "$FAKE_WORK/sleep33.n" 2> /dev/null || echo 0)
   echo $((n + 1)) > "$FAKE_WORK/sleep33.n"
   if [[ "$n" -ge 20 ]]; then
@@ -148,9 +153,13 @@ stub iptables 'echo "iptables|$*" >> "$FAKE_WORK/calls.log"
 [[ "$FAKE_IPTABLES" != fail ]] || { echo "iptables: Permission denied (you must be root)" >&2; exit 4; }'
 # shellcheck disable=SC2016
 stub ip6tables 'echo "ip6tables|$*" >> "$FAKE_WORK/calls.log"'
-# getent ahostsv4 <name>: the address of the name in $FAKE_WORK/peers (<name> <ip> lines), nothing otherwise
+# getent ahostsv4 <name>: the address of the name in $FAKE_WORK/peers (<name> <ip> lines), nothing otherwise; a
+# $FAKE_WORK/peers.next replaces the file after the first resolution (a recreated peer)
 # shellcheck disable=SC2016
-stub getent 'awk -v name="$2" '"'"'$1 == name { print $2 "  STREAM " name; found = 1 } END { exit !found }'"'"' "$FAKE_WORK/peers" 2> /dev/null'
+stub getent 'awk -v name="$2" '"'"'$1 == name { print $2 "  STREAM " name; found = 1 } END { exit !found }'"'"' "$FAKE_WORK/peers" 2> /dev/null
+status=$?
+[[ -e "$FAKE_WORK/peers.next" ]] && mv "$FAKE_WORK/peers.next" "$FAKE_WORK/peers"
+exit "$status"'
 
 # scenario <name>: a fresh state, a booted USB device that becomes unauthorized after the first holder check by default
 scenario() {
@@ -176,8 +185,8 @@ scenario() {
   export FAKE_SERVER FAKE_CONNECT FAKE_CONNECT_FAILS FAKE_DEVICE_STATE FAKE_OTHER_DEVICE FAKE_BOOT FAKE_BOOT_FAILS FAKE_STATES FAKE_USBRESET
   export ANDROID_DEVICE='' DEVICE_BUS=/dev/bus/usb/001/002 ADB_PORT=5037 ADB_POLLING_SEC=0 LOGGER_LEVEL=DEBUG
   unset DEBUG VERBOSE ANDROID_ADB_SERVER_PORT ADB_TRANSPORT_SERVER ADB_TRANSPORT_SERIAL ADB_TRANSPORT_PORT
-  unset ALLOW_REBOOT REBOOT_INTERVAL REBOOT_CONFIRM_TIMEOUT CONNECTOR_PEERS PEER_FILTER_INTERVAL FAKE_IPTABLES
-  rm -f "${WORK}/peers"
+  unset ALLOW_REBOOT REBOOT_INTERVAL REBOOT_CONFIRM_TIMEOUT CONNECTOR_PEERS PEER_FILTER_INTERVAL FAKE_IPTABLES FAKE_PEER_WAIT
+  rm -f "${WORK}/peers" "${WORK}/peers.next" "${WORK}/peer.waited"
 }
 
 # run_entrypoint: output of the entrypoint in $OUT, its exit status in $STATUS
@@ -236,11 +245,11 @@ check_contains "the peers are told" "Peer filter: only device-Pixel-1-stf, devic
 scenario
 export CONNECTOR_PEERS="device-Pixel-1-stf" PEER_FILTER_INTERVAL=7
 echo "device-Pixel-1-stf 10.233.0.3" > "${WORK}/peers"
-# the peer is recreated with a new address during the run: the old one is removed, the new one allowed
-(/bin/sleep 1 && echo "device-Pixel-1-stf 10.233.0.9" > "${WORK}/peers") &
+# the peer is recreated with a new address after the first resolution: the old one is removed, the new one allowed
+echo "device-Pixel-1-stf 10.233.0.9" > "${WORK}/peers.next"
 FAKE_STATES="device"
+export FAKE_PEER_WAIT=1
 run_entrypoint
-wait
 check_contains "a recreated peer: its new address is allowed" "-I MCLOUD_PEERS -s 10.233.0.9 -j ACCEPT" "$(calls iptables)"
 check_contains "a recreated peer: its old address is removed" "-D MCLOUD_PEERS -s 10.233.0.3 -j ACCEPT" "$(calls iptables)"
 
