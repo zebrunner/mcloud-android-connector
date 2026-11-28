@@ -24,7 +24,15 @@ stub usbreset 'echo "usbreset|$*" >> "$FAKE_WORK/calls.log"
 # shellcheck disable=SC2016
 stub sleep 'if [[ "$1" == 1 && "$FAKE_SERVER" == dies ]]; then
   /bin/sleep 0.5
+elif [[ "$1" == 7 ]]; then
+  # the refresh of the peer filter (PEER_FILTER_INTERVAL=7 of the tests)
+  /bin/sleep 0.3
 elif [[ "$1" == 33 ]]; then
+  # FAKE_PEER_WAIT=1: the first holder check waits for two refreshes of the peer filter
+  if [[ "$FAKE_PEER_WAIT" == 1 && ! -e "$FAKE_WORK/peer.waited" ]]; then
+    touch "$FAKE_WORK/peer.waited"
+    /bin/sleep 1.5
+  fi
   n=$(cat "$FAKE_WORK/sleep33.n" 2> /dev/null || echo 0)
   echo $((n + 1)) > "$FAKE_WORK/sleep33.n"
   if [[ "$n" -ge 20 ]]; then
@@ -138,6 +146,21 @@ case "$1" in
 esac
 exit 0'
 
+# iptables and ip6tables: every call is logged, FAKE_IPTABLES=fail fails them (no NET_ADMIN)
+# the stub bodies are expanded when the stubs run
+# shellcheck disable=SC2016
+stub iptables 'echo "iptables|$*" >> "$FAKE_WORK/calls.log"
+[[ "$FAKE_IPTABLES" != fail ]] || { echo "iptables: Permission denied (you must be root)" >&2; exit 4; }'
+# shellcheck disable=SC2016
+stub ip6tables 'echo "ip6tables|$*" >> "$FAKE_WORK/calls.log"'
+# getent ahostsv4 <name>: the address of the name in $FAKE_WORK/peers (<name> <ip> lines), nothing otherwise; a
+# $FAKE_WORK/peers.next replaces the file after the first resolution (a recreated peer)
+# shellcheck disable=SC2016
+stub getent 'awk -v name="$2" '"'"'$1 == name { print $2 "  STREAM " name; found = 1 } END { exit !found }'"'"' "$FAKE_WORK/peers" 2> /dev/null
+status=$?
+[[ -e "$FAKE_WORK/peers.next" ]] && mv "$FAKE_WORK/peers.next" "$FAKE_WORK/peers"
+exit "$status"'
+
 # scenario <name>: a fresh state, a booted USB device that becomes unauthorized after the first holder check by default
 scenario() {
   rm -rf "${WORK}"/*.n "${WORK}/connected" "${WORK}/ports.log" "${WORK}/server.stop" "${WORK}/node_modules" "${WORK}/zebrunner"
@@ -162,7 +185,8 @@ scenario() {
   export FAKE_SERVER FAKE_CONNECT FAKE_CONNECT_FAILS FAKE_DEVICE_STATE FAKE_OTHER_DEVICE FAKE_BOOT FAKE_BOOT_FAILS FAKE_STATES FAKE_USBRESET
   export ANDROID_DEVICE='' DEVICE_BUS=/dev/bus/usb/001/002 ADB_PORT=5037 ADB_POLLING_SEC=0 LOGGER_LEVEL=DEBUG
   unset DEBUG VERBOSE ANDROID_ADB_SERVER_PORT ADB_TRANSPORT_SERVER ADB_TRANSPORT_SERIAL ADB_TRANSPORT_PORT
-  unset ALLOW_REBOOT REBOOT_INTERVAL REBOOT_CONFIRM_TIMEOUT
+  unset ALLOW_REBOOT REBOOT_INTERVAL REBOOT_CONFIRM_TIMEOUT CONNECTOR_PEERS PEER_FILTER_INTERVAL FAKE_IPTABLES FAKE_PEER_WAIT
+  rm -f "${WORK}/peers" "${WORK}/peers.next" "${WORK}/peer.waited"
 }
 
 # run_entrypoint: output of the entrypoint in $OUT, its exit status in $STATUS
@@ -195,6 +219,59 @@ check_contains "every invalid variable is reported: first" "ADB_PORT must be" "$
 check_contains "every invalid variable is reported: second" "ADB_POLLING_SEC must be" "$OUT"
 check_contains "invalid configuration is reported" "Invalid configuration. Exiting!" "$OUT"
 check "nothing is started with invalid configuration" "" "$(calls adb)$(calls usbreset)"
+
+section "peer filter"
+scenario
+run_entrypoint
+check_contains "without CONNECTOR_PEERS nothing is filtered" "CONNECTOR_PEERS is empty: every host of the docker network" "$OUT"
+check "without CONNECTOR_PEERS no iptables" "" "$(calls iptables)"
+
+scenario
+export CONNECTOR_PEERS="device-Pixel-1-stf,device-Pixel-1-appium" PEER_FILTER_INTERVAL=7
+printf '%s\n' "device-Pixel-1-stf 10.233.0.3" "device-Pixel-1-appium 10.233.0.4" > "${WORK}/peers"
+run_entrypoint
+check_contains "the filter: the chain drops the others, the new connections of the docker networks go through it" \
+  "-w 5 -N MCLOUD_PEERS
+-w 5 -A MCLOUD_PEERS -j DROP
+-w 5 -I INPUT -i eth+ -m conntrack --ctstate NEW -j MCLOUD_PEERS" "$(calls iptables)"
+check "the adb server starts after the filter" "iptables" \
+  "$(grep -E '^(iptables\|-w 5 -I INPUT|adb\|-a )' "${WORK}/calls.log" | head -n 1 | cut -d '|' -f 1)"
+check_contains "the STF peer is allowed" "-w 5 -I MCLOUD_PEERS -s 10.233.0.3 -j ACCEPT" "$(calls iptables)"
+check_contains "the appium peer is allowed" "-w 5 -I MCLOUD_PEERS -s 10.233.0.4 -j ACCEPT" "$(calls iptables)"
+check "a peer is allowed once" "1" "$(calls iptables | grep -c -- '-I MCLOUD_PEERS -s 10.233.0.3 ')"
+check_contains "IPv6 is dropped" "-w 5 -I INPUT -i eth+ -m conntrack --ctstate NEW -j DROP" "$(calls ip6tables)"
+check_contains "the peers are told" "Peer filter: only device-Pixel-1-stf, device-Pixel-1-appium open connections to the connector" "$OUT"
+
+scenario
+export CONNECTOR_PEERS="device-Pixel-1-stf" PEER_FILTER_INTERVAL=7
+echo "device-Pixel-1-stf 10.233.0.3" > "${WORK}/peers"
+# the peer is recreated with a new address after the first resolution: the old one is removed, the new one allowed
+echo "device-Pixel-1-stf 10.233.0.9" > "${WORK}/peers.next"
+FAKE_STATES="device"
+export FAKE_PEER_WAIT=1
+run_entrypoint
+check_contains "a recreated peer: its new address is allowed" "-I MCLOUD_PEERS -s 10.233.0.9 -j ACCEPT" "$(calls iptables)"
+check_contains "a recreated peer: its old address is removed" "-D MCLOUD_PEERS -s 10.233.0.3 -j ACCEPT" "$(calls iptables)"
+
+scenario
+export CONNECTOR_PEERS="device-Pixel-1-stf" PEER_FILTER_INTERVAL=7 FAKE_IPTABLES=fail
+run_entrypoint
+check_contains "a filter that can not be installed is a configuration error" "The peer filter of CONNECTOR_PEERS can not be installed (the container needs --cap-add NET_ADMIN)" "$OUT"
+check_contains "it tells how to turn it off" "CONNECTOR_PEER_FILTER: false of mcloud-agent" "$OUT"
+check "it exits with 0" "0" "$STATUS"
+check "no adb server without the filter" "" "$(calls adb)"
+
+for value in "a b" ",stf" "stf;appium"; do
+  scenario
+  export CONNECTOR_PEERS="$value"
+  run_entrypoint
+  check_contains "CONNECTOR_PEERS='${value}' is reported" "CONNECTOR_PEERS must be the names of containers separated by commas" "$OUT"
+  check "CONNECTOR_PEERS='${value}' starts nothing" "" "$(calls adb)$(calls iptables)"
+done
+scenario
+export CONNECTOR_PEERS="stf" PEER_FILTER_INTERVAL=0
+run_entrypoint
+check_contains "an invalid PEER_FILTER_INTERVAL is reported" "PEER_FILTER_INTERVAL must be a positive integer" "$OUT"
 
 section "DEBUG and VERBOSE"
 scenario

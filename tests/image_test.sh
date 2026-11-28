@@ -13,11 +13,12 @@ PREFIX="mcloud-android-connector-test-$$"
 require_cmd docker
 docker info > /dev/null 2>&1 || skip "requires a running docker daemon"
 
-# cleanup: removes the containers of the adb server and stop checks
+# cleanup: removes the containers of the adb server, stop and peer filter checks and the network of the latter
 # called by the EXIT trap of lib.sh
 # shellcheck disable=SC2329
 cleanup() {
-  docker rm --force "${PREFIX}-server" "${PREFIX}-stop" > /dev/null 2>&1
+  docker rm --force "${PREFIX}-server" "${PREFIX}-stop" "${PREFIX}-filter" "${PREFIX}-peer" "${PREFIX}-other" > /dev/null 2>&1
+  docker network rm "${PREFIX}-net" > /dev/null 2>&1
 }
 
 # in_image <command...>: runs the command in a new container of the image instead of the entrypoint
@@ -50,7 +51,8 @@ else
 fi
 check_contains "the adb protocol of the adb servers of the hosts" "Android Debug Bridge version 1.0.41" "$(in_image adb version)"
 check "the image is built for PLATFORM" "$ARCH" "$(docker image inspect "$IMAGE" --format '{{.Architecture}}')"
-for file in /opt/zebrunner/entrypoint.sh /opt/zebrunner/util/logger.sh /opt/zebrunner/util/debug.sh /usr/local/bin/adb /usr/local/bin/usbreset; do
+for file in /opt/zebrunner/entrypoint.sh /opt/zebrunner/util/logger.sh /opt/zebrunner/util/debug.sh /opt/zebrunner/util/peerfilter.sh \
+  /usr/local/bin/adb /usr/local/bin/usbreset /usr/sbin/iptables /usr/sbin/ip6tables; do
   if in_image test -x "$file" > /dev/null; then
     pass "${file} is executable"
   else
@@ -90,7 +92,7 @@ check_contains "entrypoint" '"Entrypoint":["/opt/zebrunner/entrypoint.sh"]' "$co
 # shellcheck disable=SC2016
 check_contains "healthcheck checks the device state on ADB_PORT" 'adb -P \"${ADB_PORT}\" get-state' "$config"
 for env in ANDROID_DEVICE= DEVICE_BUS= ADB_PORT=5037 ADB_POLLING_SEC=5 LOGGER_LEVEL=INFO DEBUG=false DEBUG_TIMEOUT=3600 VERBOSE=false \
-  ADB_TRANSPORT_SERVER= ADB_TRANSPORT_SERIAL= ADB_TRANSPORT_PORT=5555; do
+  ADB_TRANSPORT_SERVER= ADB_TRANSPORT_SERIAL= ADB_TRANSPORT_PORT=5555 CONNECTOR_PEERS= PEER_FILTER_INTERVAL=2; do
   check_contains "default ${env}" "\"${env}\"" "$config"
 done
 
@@ -128,6 +130,31 @@ check "docker stop ends the entrypoint at once, without SIGKILL" "true" \
   "$([[ $((SECONDS - started)) -lt 10 ]] && echo true || echo false)"
 check "docker stop exits with 0" "0" "$(docker inspect "${PREFIX}-stop" --format '{{.State.ExitCode}}')"
 check_contains "the stop is logged" "Stopped. Exiting!" "$(docker logs "${PREFIX}-stop" 2>&1)"
+
+section "peer filter"
+# the connector of a device with the peer filter of CONNECTOR_PEERS: the peer connects to the adb server, another
+# container of the network does not
+docker network create "${PREFIX}-net" > /dev/null
+for name in peer other; do
+  docker run --detach --name "${PREFIX}-${name}" --net "${PREFIX}-net" --platform "$PLATFORM" --entrypoint sleep "$IMAGE" 300 > /dev/null
+done
+docker run --detach --name "${PREFIX}-filter" --net "${PREFIX}-net" --platform "$PLATFORM" --cap-add NET_ADMIN \
+  --env ANDROID_DEVICE=127.0.0.1:1 --env ADB_POLLING_SEC=30 --env CONNECTOR_PEERS="${PREFIX}-peer" "$IMAGE" > /dev/null
+sleep 8
+check_contains "the filter accepts the peer and drops the others" "-j ACCEPT
+-A MCLOUD_PEERS -j DROP" "$(docker exec "${PREFIX}-filter" iptables -S MCLOUD_PEERS 2>&1)"
+check "the peer reaches the adb server" "OKAY" \
+  "$(docker exec "${PREFIX}-peer" sh -c "printf '000chost:version' | nc -w 5 ${PREFIX}-filter 5037 | head -c 4" 2>&1)"
+check "another container does not" "" \
+  "$(docker exec "${PREFIX}-other" sh -c "printf '000chost:version' | nc -w 5 ${PREFIX}-filter 5037 | head -c 4" 2>&1)"
+check "the healthcheck and the adb clients of the container use the loopback" "OKAY" \
+  "$(docker exec "${PREFIX}-filter" sh -c "printf '000chost:version' | nc -w 5 127.0.0.1 5037 | head -c 4" 2>&1)"
+check_contains "the peers are logged" "Peer filter: ${PREFIX}-peer (" "$(docker logs "${PREFIX}-filter" 2>&1)"
+docker rm --force "${PREFIX}-filter" > /dev/null 2>&1
+run_image --env ANDROID_DEVICE=127.0.0.1:1 --env CONNECTOR_PEERS="${PREFIX}-peer"
+check_contains "without NET_ADMIN the filter is a configuration error" "The peer filter of CONNECTOR_PEERS can not be installed" "$OUT"
+check "without NET_ADMIN the connector exits with 0" "0" "$STATUS"
+check_not_contains "without NET_ADMIN no adb server" "Connecting to:" "$OUT"
 
 section "configuration validation"
 run_image --env ADB_PORT=abc

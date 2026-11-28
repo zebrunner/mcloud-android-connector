@@ -53,6 +53,8 @@ Set these environment variables when starting the container. The entrypoint vali
 | `ADB_TRANSPORT_SERVER` | empty | The adb server (`host:port`, e.g. `host.docker.internal:5037`) that has the USB device: Docker of macOS has no USB, see [USB device of a macOS host](#usb-device-of-a-macos-host). |
 | `ADB_TRANSPORT_SERIAL` | empty | The serial of the USB device on `ADB_TRANSPORT_SERVER` (required with it). |
 | `ADB_TRANSPORT_PORT` | `5555` | The port of the host that `ADB_TRANSPORT_SERVER` forwards to adbd of the device, unique for every device of the host. |
+| `CONNECTOR_PEERS` | empty | The names of the containers (separated by commas) that open connections to the connector, the STF and appium containers of the device (mcloud-agent passes them); the new connections of every other host of the docker networks of the container are dropped, see [Peer filter](#peer-filter). Empty: no filter. |
+| `PEER_FILTER_INTERVAL` | `2` | The seconds between the resolutions of `CONNECTOR_PEERS`: a recreated peer gets its new address. |
 | `ALLOW_REBOOT` | `false` | `true`: the device is rebooted when it has no free app UIDs, see [Reboot](#reboot). |
 | `REBOOT_INTERVAL` | `21600` | At most one reboot of the device per this many seconds. Only a confirmed reboot counts. |
 | `REBOOT_CONFIRM_TIMEOUT` | `30` | How long in seconds the device has to show its reboot after `adb reboot` (it disconnects or gets a new boot id), see [Reboot](#reboot). |
@@ -66,13 +68,25 @@ Set these environment variables when starting the container. The entrypoint vali
 
 Docker of macOS has no USB, so a USB device stays on the adb server of the host (`adb -a -P 5037 server nodaemon`, mcloud-agent runs it as a launch agent) and the container takes it from there, the host runs no device commands itself. With `ADB_TRANSPORT_SERVER` the entrypoint waits for `ADB_TRANSPORT_SERIAL` on that server (an unauthorized device exits with `0`: authorize the host on the device), switches adbd of the device to `tcp:5555` when it is not there yet (`adb tcpip 5555`, it is reset by a reboot of the device and done again by the restart), forwards `ADB_TRANSPORT_PORT` of the host to it and connects `<host>:<ADB_TRANSPORT_PORT>` as a remote device. The adb server of the container is the only one of the device for the other containers, the forwards of Appium are in the container as on Linux. The serial of the device in the container (`DEVICE_UDID` of Appium and STF) is `<host>:<ADB_TRANSPORT_PORT>`; the device also authorizes the key of the container (`/root/.android`) on the first connection.
 
+## Peer filter
+
+The adb server has no authentication and listens on all the interfaces of the container (`-a`): its forwards too, and appium reaches the ones it makes on the connector (the server of UiAutomator2, chromedriver), so it can not listen on the loopback or one address only. With `CONNECTOR_PEERS` (the containers of STF and appium of the device, `CONNECTOR_PEER_FILTER` of mcloud-agent) the entrypoint installs a packet filter in the network namespace of the container before the adb server starts (`util/peerfilter.sh`, iptables, the container needs `--cap-add NET_ADMIN`):
+
+- the new connections from the docker networks of the container (`eth+`) go through the chain `MCLOUD_PEERS`: the addresses of the peers are accepted, every other one is dropped: the docker host through the gateway of the network (its local users), an emulator container joined to the network of the device, the containers of other devices on a shared network (`DEVICE_NETWORK_ISOLATION=false` of mcloud-agent); IPv6 is dropped;
+- the loopback (the healthcheck, the adb clients of the entrypoint) and the answers to the connections of the connector (`adb connect`, the adb server of a macOS host) are not filtered;
+- the names are resolved again every `PEER_FILTER_INTERVAL` seconds: a recreated peer gets its new address, a connection of it dropped meanwhile is retried by TCP;
+- a filter that can not be installed (no `NET_ADMIN`, no packet filter of the kernel) ends the entrypoint with `0`: the connector does not run without it; `CONNECTOR_PEER_FILTER: false` of mcloud-agent turns it off.
+
+Without `CONNECTOR_PEERS` nothing is filtered (an earlier mcloud-agent), the entrypoint warns about it.
+
 ## Startup
 
-1. The adb server starts with remote access (`adb -a -P ${ADB_PORT} server nodaemon`).
-2. With `ADB_TRANSPORT_SERVER` set, the USB device of the host server is forwarded and becomes `ANDROID_DEVICE` (see above).
-3. With `ANDROID_DEVICE` set, the device is connected with `adb connect` (10 attempts).
-4. The entrypoint waits until `adb shell dumpsys display` returns the display info, so the device is fully booted (60 attempts, `ADB_POLLING_SEC` apart), and prints the filesystem usage of the device.
-5. Every 33 seconds the device state (`adb get-state`) is checked, and the log of the device for an app without a UID (see [Reboot](#reboot)).
+1. With `CONNECTOR_PEERS`, the peer filter is installed (see above).
+2. The adb server starts with remote access (`adb -a -P ${ADB_PORT} server nodaemon`).
+3. With `ADB_TRANSPORT_SERVER` set, the USB device of the host server is forwarded and becomes `ANDROID_DEVICE` (see above).
+4. With `ANDROID_DEVICE` set, the device is connected with `adb connect` (10 attempts).
+5. The entrypoint waits until `adb shell dumpsys display` returns the display info, so the device is fully booted (60 attempts, `ADB_POLLING_SEC` apart), and prints the filesystem usage of the device.
+6. Every 33 seconds the device state (`adb get-state`) is checked, and the log of the device for an app without a UID (see [Reboot](#reboot)).
 
 `docker stop` ends the entrypoint (PID 1 of the container) at once, also in a wait: it stops the adb server and exits with `0`.
 
@@ -86,7 +100,7 @@ A device that has not been rebooted for long, with many installs and uninstalls 
 
 ## Exit codes and health
 
-- Exit code `0` means a problem that a restart does not fix or a stop: `docker stop` (`SIGTERM`), invalid configuration, an unauthorized device (authorize it manually, also the adb server of the host with `ADB_TRANSPORT_SERVER`), a device in a state that needs troubleshooting (`recovery`, `rescue`, `sideload`, no permissions, ...), or a device that stays in a temporary state (`authorizing`, `connecting`, `unknown`, `bootloader`) for 10 checks.
+- Exit code `0` means a problem that a restart does not fix or a stop: `docker stop` (`SIGTERM`), invalid configuration, a peer filter that can not be installed, an unauthorized device (authorize it manually, also the adb server of the host with `ADB_TRANSPORT_SERVER`), a device in a state that needs troubleshooting (`recovery`, `rescue`, `sideload`, no permissions, ...), or a device that stays in a temporary state (`authorizing`, `connecting`, `unknown`, `bootloader`) for 10 checks.
 - Exit code `1` asks for a restart: the USB device is missing on `ADB_TRANSPORT_SERVER` or its port can't be forwarded, the adb server is not running (an adb client call would start a new one without remote access, so it is checked during the startup and before every device check), the remote device can't be connected or is lost, the device is not fully booted, the USB device is lost and its port can't be reset with `usbreset`, or the device was rebooted because it has no free app UIDs (`ALLOW_REBOOT`).
 - An `offline` device is reconnected with `adb reconnect`, a lost USB device gets its `DEVICE_BUS` port reset, the checks go on after that; a device still offline or lost after 10 checks exits with `1` (a restart connects it again).
 - The image healthcheck expects `adb -P ${ADB_PORT} get-state` to return `device`.
@@ -99,8 +113,8 @@ A device that has not been rebooted for long, with many installs and uninstalls 
 | Target | What it checks |
 | --- | --- |
 | `make lint` | `tests/lint.sh`: yamllint, actionlint, hadolint, pymarkdown, `bash -n`, ShellCheck and shfmt (style of `.editorconfig`), every env var of the `Dockerfile` documented in this README, the text file checks of CONVENTIONS.md. The tools are installed into `.venv` from `tests/requirements-lint.txt`; hadolint comes from `brew install hadolint` on macOS. |
-| `make test` | The static checks of the repository (`tests/repo_test.sh`: the pins of the `Dockerfile`, the Dependabot configuration) and the tests of `util/logger.sh`, `util/debug.sh` and `entrypoint.sh`: configuration validation, the adb server port and its liveness, USB and remote devices, the boot wait, every device state of the holder with its retry limits, the reboot of a device without free app UIDs, `SIGTERM`, the `DEBUG` and `VERBOSE` modes. The tools are stubs (`adb`, `usbreset`, `sleep`), so no docker and no Android device are needed, but bash 4+ is (on macOS `brew install bash`). |
-| `make docker` | `tests/image_test.sh`: builds the image (`PLATFORM`: `linux/amd64` by default or `linux/arm64`, `IMAGE` overrides its tag, `REBUILD=true` rebuilds it), checks its contents, the installed versions of the pinned packages, configuration, configuration validation and the entrypoint startup without a device, also with a stopped adb server, and `docker stop`. |
+| `make test` | The static checks of the repository (`tests/repo_test.sh`: the pins of the `Dockerfile`, the Dependabot configuration) and the tests of `util/logger.sh`, `util/debug.sh` and `entrypoint.sh`: configuration validation, the adb server port and its liveness, USB and remote devices, the boot wait, every device state of the holder with its retry limits, the reboot of a device without free app UIDs, the peer filter, `SIGTERM`, the `DEBUG` and `VERBOSE` modes. The tools are stubs (`adb`, `usbreset`, `sleep`, `iptables`, `getent`), so no docker and no Android device are needed, but bash 4+ is (on macOS `brew install bash`). |
+| `make docker` | `tests/image_test.sh`: builds the image (`PLATFORM`: `linux/amd64` by default or `linux/arm64`, `IMAGE` overrides its tag, `REBUILD=true` rebuilds it), checks its contents, the installed versions of the pinned packages, configuration, configuration validation and the entrypoint startup without a device, also with a stopped adb server, `docker stop`, and the peer filter in a docker network (a peer connects, another container does not). |
 
 Every test script prints its checks and writes JUnit XML into `JUNIT_DIR` when it is set.
 

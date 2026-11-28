@@ -4,6 +4,8 @@
 . /opt/zebrunner/util/debug.sh
 # shellcheck source=util/logger.sh
 . /opt/zebrunner/util/logger.sh
+# shellcheck source=util/peerfilter.sh
+. /opt/zebrunner/util/peerfilter.sh
 
 # the first log line: the image, its version and the device (CONVENTIONS.md#terminal-output)
 loggerBanner mcloud-android-connector "${IMAGE_VERSION:-dev}"
@@ -70,6 +72,12 @@ if [[ $isConfigValid -eq 0 ]]; then
   logger "ERROR" "Invalid configuration. Exiting!"
   exit 0
 fi
+
+#### Peer filter
+# the adb server listens on all the interfaces (-a): its forwards too, appium reaches the ones it makes (the server of
+# UiAutomator2, chromedriver) on the connector; only the STF and appium containers of the device reach them
+# (CONNECTOR_PEERS, util/peerfilter.sh)
+startPeerFilter
 
 #### Start ADB
 # "-a" - allow remote access
